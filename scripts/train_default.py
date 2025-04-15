@@ -142,11 +142,12 @@ def train(
     )
     model = AutoModelForCausalLM.from_pretrained(model_name)
     model.gradient_checkpointing = True
-    lightning_model = CausalLLM(
+    lightning_model = DEQCausalLLM(
         model=model,
         lr=lr,
         warmup_steps=warmup_steps,
         weight_decay=weight_decay,
+        estimated_stepping_batches=trainer_args.get("max_steps")
     )
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
     trainer = L.Trainer(
