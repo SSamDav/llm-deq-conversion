@@ -95,7 +95,9 @@ class DEQCausalLLM(CausalLLM):
             shift_logits.view(-1, shift_logits.size(-1)),  # (batch * seq_len, vocab)
             shift_labels.view(-1)                          # (batch * seq_len)
         )
-        loss += distance
+        self.log("cross_entropy", loss)
+        self.log("L1 distance", distance)
+        loss += 0.0001 * distance
         self.log("train_loss", loss)
         return loss
 
