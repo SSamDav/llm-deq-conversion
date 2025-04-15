@@ -8,9 +8,8 @@ from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torchdeq.solver.broyden import broyden_solver
 from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling, get_scheduler
-
-model_name = "HuggingFaceTB/SmolLM2-135M"
-max_length = 512
+from jsonargparse import CLI
+from lightning.pytorch.loggers import WandbLogger
 
 
 def select_first_k(dataset, k):
@@ -124,7 +123,7 @@ def train(
 ):
     trainer_args = trainer_args or {}
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    train_dataset= load_dataset("HuggingFaceTB/finemath", "finemath-4plus", split="train", streaming=True, num_proc=8)
+    train_dataset= load_dataset("HuggingFaceTB/finemath", "finemath-4plus", split="train", streaming=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -142,15 +141,21 @@ def train(
         collate_fn=data_collator
     )
     model = AutoModelForCausalLM.from_pretrained(model_name)
+    model.gradient_checkpointing = True
     lightning_model = CausalLLM(
         model=model,
         lr=lr,
         warmup_steps=warmup_steps,
         weight_decay=weight_decay,
     )
+    wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
     trainer = L.Trainer(
+        logger=wandb_logger,
         **trainer_args
     )
     trainer.fit(
         lightning_model, train_dataloaders=train_dataloader, ckpt_path=ckpt_path
     )
+
+if __name__ == "__main__":
+    CLI(train)
