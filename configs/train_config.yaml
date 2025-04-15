@@ -1,5 +1,5 @@
 model_name: "HuggingFaceTB/SmolLM2-135M"
-batch_size: 8
+batch_size: 6
 lr: 0.00006
 trainer_args:
   max_steps: 32000
