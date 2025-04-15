@@ -1,0 +1,2 @@
+model_name: "HuggingFaceTB/SmolLM2-135M-instruct"
+tasks: "leaderboard|gsm8k|5|1"
