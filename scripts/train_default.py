@@ -141,7 +141,7 @@ def train(
         collate_fn=data_collator
     )
     model = AutoModelForCausalLM.from_pretrained(model_name)
-    model.gradient_checkpointing = True
+    model.model.gradient_checkpointing = True
     lightning_model = DEQCausalLLM(
         model=model,
         lr=lr,
