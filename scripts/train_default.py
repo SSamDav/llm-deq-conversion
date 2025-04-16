@@ -149,7 +149,8 @@ def train(
         lr=lr,
         warmup_steps=warmup_steps,
         weight_decay=weight_decay,
-        estimated_stepping_batches=trainer_args.get("max_steps")
+        estimated_stepping_batches=trainer_args.get("max_steps"),
+        phantom_steps=1,
     )
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
     trainer = L.Trainer(

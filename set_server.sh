@@ -18,8 +18,8 @@ mkdir -p ~/hx
 tar -xf ~/hx.tar.xz -C ~/hx
 
 # Update PATH in .bashrc if not already present
-if ! grep -q 'export PATH=\$PATH:$HOME/hx' ~/.bashrc; then
-    echo "export PATH=\$PATH:\$HOME/hx" >> ~/.bashrc
+if ! grep -q 'export PATH=\$PATH:$HOME/hx/helix-25.01.1-x86_64-linux' ~/.bashrc; then
+    echo "export PATH=\$PATH:\$HOME/hx/helix-25.01.1-x86_64-linux" >> ~/.bashrc
 fi
 
 # Create Helix config file
