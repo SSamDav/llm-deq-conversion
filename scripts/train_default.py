@@ -1,33 +1,35 @@
 import lightning as L
-import torch
-import torch.nn.functional as F
 
-from datasets import load_dataset, Dataset
+from datasets import load_dataset
 from typing import Optional
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-from torchdeq.solver.broyden import broyden_solver
-from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling, get_scheduler
+from transformers.models.auto.modeling_auto import AutoModelForCausalLM
+from transformers.models.auto.tokenization_auto import AutoTokenizer
+from transformers.models.auto.configuration_auto import AutoConfig
+from transformers.data.data_collator import DataCollatorForLanguageModeling
+from transformers.optimization import get_wsd_schedule
 from jsonargparse import CLI
 from lightning.pytorch.loggers import WandbLogger
-
-
-def select_first_k(dataset, k):
-    selected_data = []
-    for i, item in enumerate(dataset):
-        if i >= k:  # Stop after collecting one shard's worth
-            break
-        selected_data.append(item)
-    return Dataset.from_list(selected_data)
-
+from lightning.pytorch.callbacks import ModelCheckpoint
+from llm_deq_conversion.model import DEQLlamaForCausalLM
 
 class CausalLLM(L.LightningModule):
-    def __init__(self, model, lr=5e-5, warmup_steps=100, weight_decay=0.01, estimated_stepping_batches: Optional[int] = None):
+    def __init__(
+        self,
+        max_steps,
+        model,
+        lr=5e-5,
+        num_warmup_steps=100,
+        num_decay_steps=200,
+        weight_decay=0.01,
+    ):
         super().__init__()
         self.lr = lr
-        self.warmup_steps = warmup_steps
+        self.num_warmup_steps = num_warmup_steps
+        self.num_decay_steps = num_decay_steps
         self.weight_decay = weight_decay
-        self.estimated_stepping_batches = estimated_stepping_batches
+        self.max_steps = max_steps
         self.save_hyperparameters()
         self.model = model
 
@@ -35,82 +37,31 @@ class CausalLLM(L.LightningModule):
         return self.model(input_ids=input_ids, attention_mask=attention_mask, labels=labels).logits
 
     def training_step(self, batch, batch_idx):
-        logits = self(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = batch["labels"][..., 1:].contiguous()
-        loss = F.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),  # (batch * seq_len, vocab)
-            shift_labels.view(-1)                          # (batch * seq_len)
-        )
+        loss = self.model(
+            input_ids=batch["input_ids"],
+            attention_mask=batch["attention_mask"],
+            labels=batch["labels"]
+        ).loss
         self.log("train_loss", loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        logits = self(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = batch["labels"][..., 1:].contiguous()
-        val_loss = F.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),  # (batch * seq_len, vocab)
-            shift_labels.view(-1)                          # (batch * seq_len)
-        )
+        val_loss = self.model(
+            input_ids=batch["input_ids"],
+            attention_mask=batch["attention_mask"],
+            labels=batch["labels"]
+        ).loss
         self.log("val_loss", val_loss)
 
     def configure_optimizers(self):
         optimizer = AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        scheduler = get_scheduler(
-            "linear",
+        scheduler = get_wsd_schedule(
             optimizer=optimizer,
-            num_warmup_steps=self.warmup_steps,
-            num_training_steps=self.estimated_stepping_batches
+            num_warmup_steps=self.num_warmup_steps,
+            num_decay_steps=self.num_decay_steps,
+            num_training_steps=self.max_steps
         )
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]    
-
-
-class DEQCausalLLM(CausalLLM):
-    def __init__(self, model, damp: float = 0.9, phantom_steps: int = 3, lr=5e-5, warmup_steps=100, weight_decay=0.01, estimated_stepping_batches: Optional[int] = None):
-        self.damp = damp
-        self.phantom_steps = phantom_steps
-        super().__init__(model, lr, warmup_steps, weight_decay, estimated_stepping_batches)
-        
-    def forward(self, input_ids, attention_mask, labels=None):
-        u = self.model.model.embed_tokens(input_ids)
-        z0 = torch.zeros_like(u)
-        f = lambda x: self.model.model(inputs_embeds=(u + x), attention_mask=attention_mask).last_hidden_state
-        with torch.no_grad():
-          h, _, _ = broyden_solver(f, z0)
-
-        start_h = h.clone()
-        if self.training:
-            for _ in range(self.phantom_steps):
-              h = (1 - self.damp) * h + self.damp * f(h)
-        distance = (start_h - h).norm(p=1)
-        logits = self.model.lm_head(h)
-        return logits, distance
-
-    def training_step(self, batch, batch_idx):
-        logits, distance  = self(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = batch["labels"][..., 1:].contiguous()
-        loss = F.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),  # (batch * seq_len, vocab)
-            shift_labels.view(-1)                          # (batch * seq_len)
-        )
-        self.log("cross_entropy", loss)
-        self.log("L1 distance", distance)
-        loss += 0.0001 * distance
-        self.log("train_loss", loss)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        logits, distance = self(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = batch["labels"][..., 1:].contiguous()
-        val_loss = F.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),  # (batch * seq_len, vocab)
-            shift_labels.view(-1)                          # (batch * seq_len)
-        )
-        val_loss += distance
-        self.log("val_loss", val_loss)
 
 
 def train(
@@ -118,14 +69,18 @@ def train(
     batch_size: int,
     lr: float,
     max_length: int = 1024,
-    warmup_steps: int = 100,
+    num_warmup_steps: int = 100,
+    num_decay_steps: int = 200,
     weight_decay: float = 0.01,
+    deq_max_steps: int = 4,
+    phantom_steps: int = 1,
     trainer_args: Optional[dict] = None,
     ckpt_path: Optional[str] = None
 ):
     trainer_args = trainer_args or {}
+    max_steps = trainer_args["max_steps"]
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    train_dataset= load_dataset("HuggingFaceTB/finemath", "finemath-4plus", split="train", streaming=True)
+    train_dataset = load_dataset("HuggingFaceTB/smollm-corpus", "fineweb-edu-dedup", split="train", streaming=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -142,19 +97,35 @@ def train(
         batch_size=batch_size,
         collate_fn=data_collator
     )
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+    original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
+    config = AutoConfig.from_pretrained(model_name)
+    config.use_cache = False
+    # config.torch_dtype = "float32"
+    model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps)
+
+    _ = model.load_state_dict(original_model_params, strict=False)
+    del original_model_params
+    
     model.model.gradient_checkpointing = True
-    lightning_model = DEQCausalLLM(
+    lightning_model = CausalLLM(
         model=model,
+        max_steps=max_steps,
         lr=lr,
-        warmup_steps=warmup_steps,
+        num_warmup_steps=num_warmup_steps,
+        num_decay_steps=num_decay_steps,
         weight_decay=weight_decay,
-        estimated_stepping_batches=trainer_args.get("max_steps"),
-        phantom_steps=1,
     )
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
+    checkpoint_callback = ModelCheckpoint(
+        every_n_train_steps=max_steps // 4, 
+        dirpath="checkpoints/",  
+        save_top_k=4,  
+        save_last=True,
+        filename="step-{step:06d}",  
+    )
     trainer = L.Trainer(
         logger=wandb_logger,
+        callbacks=[checkpoint_callback],
         **trainer_args
     )
     trainer.fit(

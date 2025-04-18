@@ -1,6 +1,9 @@
 model_name: "HuggingFaceTB/SmolLM2-135M"
-batch_size: 6
-lr: 0.00006
+batch_size: 64
+max_length: 512
+lr: 0.0001
+num_warmup_steps: 100
+num_decay_steps: 200
 trainer_args:
   max_steps: 32000
   precision: bf16-true
