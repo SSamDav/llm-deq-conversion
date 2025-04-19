@@ -66,8 +66,10 @@ class CausalLLM(L.LightningModule):
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 
     def on_before_optimizer_step(self, optimizer):
-        norm_order = 2.0 
+        norm_order = 2.0
         norms = grad_norm(self, norm_type=norm_order)
+        print(norms.keys())
+        import pdb; pdb.set_trace()
         self.log('Grad Norm', norms[f'grad_{norm_order}_norm_total'],on_step=True, on_epoch=False)
 
 
