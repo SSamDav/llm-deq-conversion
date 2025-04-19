@@ -12,6 +12,7 @@ from transformers.optimization import get_wsd_schedule
 from jsonargparse import CLI
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.utilities import grad_norm
 from llm_deq_conversion.model import DEQLlamaForCausalLM
 
 class CausalLLM(L.LightningModule):
@@ -37,13 +38,14 @@ class CausalLLM(L.LightningModule):
         return self.model(input_ids=input_ids, attention_mask=attention_mask, labels=labels).logits
 
     def training_step(self, batch, batch_idx):
-        loss = self.model(
+        output= self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
             labels=batch["labels"]
-        ).loss
-        self.log("train_loss", loss)
-        return loss
+        )
+        self.log("train_loss", output.loss)
+        self.log("train_distance", output.distance)
+        return output.loss
 
     def validation_step(self, batch, batch_idx):
         val_loss = self.model(
@@ -61,7 +63,12 @@ class CausalLLM(L.LightningModule):
             num_decay_steps=self.num_decay_steps,
             num_training_steps=self.max_steps
         )
-        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]    
+        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+
+    def on_before_optimizer_step(self, optimizer):
+        norm_order = 2.0 
+        norms = grad_norm(self, norm_type=norm_order)
+        self.log('Grad Norm', norms[f'grad_{norm_order}_norm_total'],on_step=True, on_epoch=False)
 
 
 def train(
