@@ -126,7 +126,6 @@ def train(
     checkpoint_callback = ModelCheckpoint(
         every_n_train_steps=max_steps // 4, 
         dirpath="checkpoints/",  
-        save_top_k=4,  
         save_last=True,
         filename="step-{step:06d}",  
     )
