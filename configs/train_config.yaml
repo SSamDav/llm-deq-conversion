@@ -1,5 +1,5 @@
 model_name: "HuggingFaceTB/SmolLM2-135M"
-batch_size: 32
+batch_size: 64
 max_length: 512
 lr: 0.0001
 num_warmup_steps: 100

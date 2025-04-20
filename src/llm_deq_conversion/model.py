@@ -300,6 +300,8 @@ class DEQLlamaModel(LlamaModel):
             )
             if self.max_steps > 1 and self.phantom_steps > 1:
                 hidden_states = (1 - self.damp) * hidden_states + self.damp * new_hidden_states
+            else:
+                hidden_states = new_hidden_states
 
 
         # add hidden states from the last decoder layer
