@@ -266,7 +266,7 @@ class DEQLlamaModel(LlamaModel):
             attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
         )
 
-        z0 = torch.zeros_like(inputs_embeds)
+        hidden_states = torch.zeros_like(inputs_embeds)
         f = lambda x: self._transformer_layers(
             input_states=inputs_embeds,
             hidden_states=x,
@@ -280,9 +280,9 @@ class DEQLlamaModel(LlamaModel):
             **flash_attn_kwargs
         )[0]
         
-
-        with torch.no_grad():
-            hidden_states, _, _ = broyden_solver(f, z0, max_iter=self.max_steps)
+        if self.max_steps > 0:
+            with torch.no_grad():
+                hidden_states, _, _ = broyden_solver(f, hidden_states, max_iter=self.max_steps)
       
         start_hidden_states = hidden_states
         for _ in range(self.phantom_steps):
@@ -298,7 +298,8 @@ class DEQLlamaModel(LlamaModel):
                 cache_position=cache_position,
                 **flash_attn_kwargs
             )
-            hidden_states = (1 - self.damp) * hidden_states + self.damp * new_hidden_states
+            if self.max_steps > 1 and self.phantom_steps > 1:
+                hidden_states = (1 - self.damp) * hidden_states + self.damp * new_hidden_states
 
 
         # add hidden states from the last decoder layer
@@ -461,7 +462,7 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
         distance = None
         if labels is not None:
             loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
-            if start_hidden_states is not None:
+            if start_hidden_states is not None and self.model.max_steps > 1:
               distance =  (hidden_states - start_hidden_states).norm(p=1, dim=-1).mean()
               loss += self.distance_loss_weight * distance
 
