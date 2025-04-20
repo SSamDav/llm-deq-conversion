@@ -44,7 +44,8 @@ class CausalLLM(L.LightningModule):
             labels=batch["labels"]
         )
         self.log("train_loss", output.loss)
-        self.log("train_distance", output.distance)
+        if output.distance is not None:
+            self.log("train_distance", output.distance)
         return output.loss
 
     def validation_step(self, batch, batch_idx):
