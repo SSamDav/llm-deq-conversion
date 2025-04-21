@@ -1,5 +1,6 @@
 import lightning as L
 import os
+import torch
 
 from datasets import concatenate_datasets, load_dataset
 from typing import Optional
@@ -84,7 +85,8 @@ def train(
     deq_max_steps: int = 4,
     phantom_steps: int = 1,
     trainer_args: Optional[dict] = None,
-    ckpt_path: Optional[str] = None
+    ckpt_path: Optional[str] = None,
+    state_dict_path: Optional[str] = None,
 ):
     trainer_args = trainer_args or {}
     max_steps = trainer_args["max_steps"]
@@ -117,14 +119,22 @@ def train(
         collate_fn=data_collator,
         num_workers=os.cpu_count() 
     )
-    original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
-    config = AutoConfig.from_pretrained(model_name)
-    config.use_cache = False
-    # config.torch_dtype = "float32"
-    model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps)
+    if state_dict_path is None:
+        original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
+        config = AutoConfig.from_pretrained(model_name)
+        config.use_cache = False
+        # config.torch_dtype = "float32"
+        model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps)
 
-    _ = model.load_state_dict(original_model_params, strict=False)
-    del original_model_params
+        _ = model.load_state_dict(original_model_params, strict=False)
+        del original_model_params
+    else:
+        config = AutoConfig.from_pretrained(model_name)
+        config.use_cache = False
+        # config.torch_dtype = "float32"
+        model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps)
+
+        _ = model.load_state_dict(torch.load(state_dict_path), strict=False)
     
     model.model.gradient_checkpointing = True
     lightning_model = CausalLLM(
@@ -150,6 +160,9 @@ def train(
     )
     trainer.fit(
         lightning_model, train_dataloaders=train_dataloader, ckpt_path=ckpt_path
+    )
+    torch.save(
+        lightning_model.model.state_dict(), "adapted_model.pth"
     )
 
 if __name__ == "__main__":
