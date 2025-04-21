@@ -465,7 +465,7 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
         if labels is not None:
             loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
             if start_hidden_states is not None and self.model.max_steps > 1:
-              distance =  (hidden_states - start_hidden_states).norm(p=1, dim=-1).mean()
+              distance =  (hidden_states - start_hidden_states).abs().mean()
               loss += self.distance_loss_weight * distance
 
         return DEQCausalLMOutputWithPast(
