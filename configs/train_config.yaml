@@ -1,10 +1,10 @@
 datasets:
   - weight: 0.70
-    name: "HuggingFaceTB/smollm-corpus"
-    path: "fineweb-edu-dedup"
+    path: "HuggingFaceTB/smollm-corpus"
+    name: "fineweb-edu-dedup"
   - weight: 0.30
-    name: "HuggingFaceTB/smollm-corpus"
-    path: "cosmopedia-v2"
+    path: "HuggingFaceTB/smollm-corpus"
+    name: "cosmopedia-v2"
   # - weight: 0.15
   #   name: "HuggingFaceTB/smollm-corpus"
   #   path: "python-edu"
@@ -12,7 +12,6 @@ model_name: "HuggingFaceTB/SmolLM2-135M"
 batch_size: 64
 max_length: 512
 lr: 0.001
-accumulate_grad_batches: 2
 num_warmup_steps: 100
 num_decay_steps: 200
 deq_max_steps: 0
@@ -21,5 +20,6 @@ trainer_args:
   max_steps: 32000
   precision: bf16-true
   gradient_clip_val: 2.0
+  accumulate_grad_batches: 2
   # devices: 2
   # strategy: "deepspeed_stage_2"
