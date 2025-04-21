@@ -16,6 +16,7 @@ num_warmup_steps: 100
 num_decay_steps: 200
 deq_max_steps: 4
 phantom_steps: 1
+distance_loss_weight: 0.01
 trainer_args:
   max_steps: 3000
   precision: bf16-true

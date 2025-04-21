@@ -84,6 +84,7 @@ def train(
     weight_decay: float = 0.01,
     deq_max_steps: int = 4,
     phantom_steps: int = 1,
+    distance_loss_weight: float = 0.001,
     trainer_args: Optional[dict] = None,
     ckpt_path: Optional[str] = None,
     state_dict_path: Optional[str] = None,
@@ -119,21 +120,15 @@ def train(
         collate_fn=data_collator,
         num_workers=os.cpu_count() 
     )
+    config = AutoConfig.from_pretrained(model_name)
+    config.use_cache = False
+    # config.torch_dtype = "float32"
+    model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, distance_loss_weight=distance_loss_weight)
     if state_dict_path is None:
         original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
-        config = AutoConfig.from_pretrained(model_name)
-        config.use_cache = False
-        # config.torch_dtype = "float32"
-        model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps)
-
         _ = model.load_state_dict(original_model_params, strict=False)
         del original_model_params
     else:
-        config = AutoConfig.from_pretrained(model_name)
-        config.use_cache = False
-        # config.torch_dtype = "float32"
-        model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps)
-
         _ = model.load_state_dict(torch.load(state_dict_path), strict=False)
     
     model.model.gradient_checkpointing = True
