@@ -1,6 +1,7 @@
 import lightning as L
+import os
 
-from datasets import load_dataset
+from datasets import concatenate_datasets, load_dataset
 from typing import Optional
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
@@ -11,7 +12,7 @@ from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.optimization import get_wsd_schedule
 from jsonargparse import CLI
 from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.utilities import grad_norm
 from llm_deq_conversion.model import DEQLlamaForCausalLM
 
@@ -72,6 +73,7 @@ class CausalLLM(L.LightningModule):
 
 
 def train(
+    datasets: list[dict],
     model_name: str,
     batch_size: int,
     lr: float,
@@ -87,7 +89,17 @@ def train(
     trainer_args = trainer_args or {}
     max_steps = trainer_args["max_steps"]
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    train_dataset = load_dataset("HuggingFaceTB/smollm-corpus", "fineweb-edu-dedup", split="train", streaming=True)
+    assert sum([d["weight"] for d in datasets]) == 1.0, "Dataset weights should sum to 1.0!"
+    train_dataset = []
+    for d in datasets:
+        # "HuggingFaceTB/smollm-corpus", "fineweb-edu-dedup"
+        num_datapoints = d["weight"] * max_steps
+        dataset  = load_dataset(d["path"], d["name"], split="train", streaming=True).select(range(num_datapoints))
+        train_dataset.append(dataset)
+    train_dataset = concatenate_datasets(train_dataset).shuffle()
+    
+        
+        
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -102,7 +114,8 @@ def train(
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        collate_fn=data_collator
+        collate_fn=data_collator,
+        num_workers=os.cpu_count() 
     )
     original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
     config = AutoConfig.from_pretrained(model_name)
@@ -129,9 +142,10 @@ def train(
         save_last=True,
         filename="step-{step:06d}",  
     )
+    learning_rate_callback = LearningRateMonitor()
     trainer = L.Trainer(
         logger=wandb_logger,
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback, learning_rate_callback],
         **trainer_args
     )
     trainer.fit(
