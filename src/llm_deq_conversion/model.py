@@ -284,7 +284,7 @@ class DEQLlamaModel(LlamaModel):
             with torch.no_grad():
                 hidden_states, _, _ = broyden_solver(f, hidden_states, max_iter=self.max_steps)
       
-        start_hidden_states = hidden_states
+        distance = None
         for _ in range(self.phantom_steps):
             new_hidden_states, all_hidden_states, all_self_attns = self._transformer_layers(
                 input_states=inputs_embeds,
@@ -298,6 +298,7 @@ class DEQLlamaModel(LlamaModel):
                 cache_position=cache_position,
                 **flash_attn_kwargs
             )
+            distance = (hidden_states - new_hidden_states).abs().mean()
             if self.max_steps > 1 and self.phantom_steps > 1:
                 hidden_states = (1 - self.damp) * hidden_states + self.damp * new_hidden_states
             else:
@@ -308,7 +309,7 @@ class DEQLlamaModel(LlamaModel):
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
 
-        return hidden_states, start_hidden_states
+        return hidden_states, distance
     
     def _transformer_layers(
         self,
@@ -443,7 +444,7 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
         )
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
-        hidden_states, start_hidden_states = self.model(
+        hidden_states, distance = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -464,8 +465,7 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
         distance = None
         if labels is not None:
             loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
-            if start_hidden_states is not None and self.model.max_steps > 1:
-              distance =  (hidden_states - start_hidden_states).abs().mean()
+            if distance is not None and self.model.max_steps > 1:
               loss += self.distance_loss_weight * distance
 
         return DEQCausalLMOutputWithPast(
