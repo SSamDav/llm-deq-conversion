@@ -30,6 +30,7 @@ logger = logging.get_logger(__name__)
 @dataclass
 class DEQCausalLMOutputWithPast(CausalLMOutputWithPast):
     distance: Optional[float] = None
+    stats: Optional[dict] = None
 
 class DEQLlamaAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
@@ -282,34 +283,35 @@ class DEQLlamaModel(LlamaModel):
         
         if self.max_steps > 0:
             with torch.no_grad():
-                hidden_states, _, _ = broyden_solver(f, hidden_states, max_iter=self.max_steps)
+                hidden_states, _, stats = broyden_solver(f, hidden_states, max_iter=self.max_steps)
       
         distance = None
-        for _ in range(self.phantom_steps):
-            new_hidden_states, all_hidden_states, all_self_attns = self._transformer_layers(
-                input_states=inputs_embeds,
-                hidden_states=hidden_states,
-                position_ids=position_ids,
-                causal_mask=causal_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                past_key_values=past_key_values,
-                use_cache=use_cache,
-                cache_position=cache_position,
-                **flash_attn_kwargs
-            )
-            distance = (hidden_states - new_hidden_states).abs().mean()
-            if self.max_steps > 1 and self.phantom_steps > 1:
-                hidden_states = (1 - self.damp) * hidden_states + self.damp * new_hidden_states
-            else:
-                hidden_states = new_hidden_states
+        if self.training:
+            for _ in range(self.phantom_steps):
+                new_hidden_states, all_hidden_states, all_self_attns = self._transformer_layers(
+                    input_states=inputs_embeds,
+                    hidden_states=hidden_states,
+                    position_ids=position_ids,
+                    causal_mask=causal_mask,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    past_key_values=past_key_values,
+                    use_cache=use_cache,
+                    cache_position=cache_position,
+                    **flash_attn_kwargs
+                )
+                distance = (hidden_states - new_hidden_states).abs().mean()
+                if self.max_steps > 1 and self.phantom_steps > 1:
+                    hidden_states = (1 - self.damp) * hidden_states + self.damp * new_hidden_states
+                else:
+                    hidden_states = new_hidden_states
 
 
         # add hidden states from the last decoder layer
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
 
-        return hidden_states, distance
+        return hidden_states, distance, stats
     
     def _transformer_layers(
         self,
@@ -444,7 +446,7 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
         )
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
-        hidden_states, distance = self.model(
+        hidden_states, distance, stats = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -470,5 +472,6 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
         return DEQCausalLMOutputWithPast(
             loss=loss,
             logits=logits,
-            distance=distance
+            distance=distance,
+            stats=stats
         )

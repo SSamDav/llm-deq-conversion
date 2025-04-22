@@ -123,7 +123,7 @@ def train(
     config = AutoConfig.from_pretrained(model_name)
     config.use_cache = False
     # config.torch_dtype = "float32"
-    model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, distance_loss_weight=distance_loss_weight)
+    model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, distance_loss_weight=distance_loss_weight)model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, distance_loss_weight=distance_loss_weight)
     if state_dict_path is None:
         original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
         _ = model.load_state_dict(original_model_params, strict=False)
