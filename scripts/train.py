@@ -3,7 +3,7 @@ import os
 import tenacity
 import torch
 
-from datasets import concatenate_datasets, load_dataset, DownloadConfig
+from datasets import interleave_datasets, load_dataset, DownloadConfig
 from typing import Optional
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
@@ -99,13 +99,13 @@ def train(
     max_steps = trainer_args["max_steps"]
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     assert sum([d["weight"] for d in datasets]) == 1.0, "Dataset weights should sum to 1.0!"
-    train_dataset = []
+    train_dataset, weights = [], []
     for d in datasets:
         # "HuggingFaceTB/smollm-corpus", "fineweb-edu-dedup"
-        num_datapoints = d["weight"] * max_steps
+        weights.append(d["weight"])
         dataset  = load_dataset_with_retry(**d["args"], download_config=DownloadConfig(resume_download=True,max_retries=10)) # .select(range(num_datapoints))
         train_dataset.append(dataset)
-    train_dataset = concatenate_datasets(train_dataset).shuffle(seed=42, buffer_size=1000)
+    train_dataset = interleave_datasets(train_dataset, probabilities=weights, seed=42)
     
     folder_name = f"deq_steps={deq_max_steps}-phantom_steps={phantom_steps}"     
         
