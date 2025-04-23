@@ -135,12 +135,13 @@ def train(
             del original_model_params
         else:
             _ = model.load_state_dict(torch.load(state_dict_path), strict=False)
-        model.model.gradient_checkpointing = True
+        # model.model.gradient_checkpointing = True
         
     else:
         print("Training a normal model!!!")
         model = AutoModelForCausalLM.from_config(config)
-    
+
+    model.gradient_checkpointing_enable()
     lightning_model = CausalLLM(
         model=model,
         max_steps=max_steps,
