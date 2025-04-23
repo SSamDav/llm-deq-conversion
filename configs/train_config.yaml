@@ -4,11 +4,13 @@ datasets:
       path: "HuggingFaceTB/smollm-corpus"
       name: "fineweb-edu-dedup"
       split: train
+      streaming: True
   - weight: 0.30
     args:
       path: "HuggingFaceTB/smollm-corpus"
       name: "cosmopedia-v2"
       split: train
+      streaming: True
 model_name: "HuggingFaceTB/SmolLM2-135M"
 batch_size: 128
 max_length: 512
