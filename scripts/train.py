@@ -149,13 +149,14 @@ def train(
         weight_decay=weight_decay,
     )
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
+    wandb_logger.log_hyperparams(trainer_args)
     checkpoint_callback = ModelCheckpoint(
         every_n_train_steps=max_steps // 4, 
         dirpath=f"checkpoints/{folder_name}",  
         save_last=True,
         filename="{step:06d}-{train_loss:.2f}",  
     )
-    learning_rate_callback = LearningRateMonitor()
+    learning_rate_callback = LearningRateMonitor(logging_interval="step")
     trainer = L.Trainer(
         logger=wandb_logger,
         callbacks=[checkpoint_callback, learning_rate_callback],
