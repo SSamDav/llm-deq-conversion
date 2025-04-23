@@ -1,5 +1,6 @@
 import lightning as L
 import os
+import tenacity
 import torch
 
 from datasets import concatenate_datasets, load_dataset, DownloadConfig
@@ -73,6 +74,11 @@ class CausalLLM(L.LightningModule):
         self.log('Grad Norm', norms[f'grad_2.0_norm_total'],on_step=True, on_epoch=False)
 
 
+@tenacity.retry(stop=tenacity.stop_after_attempt(3), wait=tenacity.wait_fixed(5))
+def load_dataset_with_retry(*args, **kwargs):
+    return load_dataset(*args, **kwargs)
+
+
 def train(
     datasets: list[dict],
     model_name: str,
@@ -97,7 +103,7 @@ def train(
     for d in datasets:
         # "HuggingFaceTB/smollm-corpus", "fineweb-edu-dedup"
         num_datapoints = d["weight"] * max_steps
-        dataset  = load_dataset(**d["args"], download_config=DownloadConfig(resume_download=True,max_retries=10)) # .select(range(num_datapoints))
+        dataset  = load_dataset_with_retry(**d["args"], download_config=DownloadConfig(resume_download=True,max_retries=10)) # .select(range(num_datapoints))
         train_dataset.append(dataset)
     train_dataset = concatenate_datasets(train_dataset).shuffle(seed=42, buffer_size=1000)
     
