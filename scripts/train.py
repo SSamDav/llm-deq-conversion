@@ -159,8 +159,8 @@ def train(
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
     wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "distance_weight": distance_loss_weight, "max_length": max_length, "datasets": datasets})
     checkpoint_callback = ModelCheckpoint(
-        every_n_train_steps=max_steps // 4,
-        save_top_k=-1,
+        every_n_train_steps=max_steps // 5,
+        save_top_k=2,
         dirpath=f"checkpoints/{folder_name}",  
         save_last=True,
         filename="{step:06d}-{train_loss:.2f}",  
