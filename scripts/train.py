@@ -2,7 +2,7 @@ import lightning as L
 import os
 import torch
 
-from datasets import concatenate_datasets, load_dataset
+from datasets import concatenate_datasets, load_dataset, DownloadConfig
 from typing import Optional
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
@@ -97,7 +97,7 @@ def train(
     for d in datasets:
         # "HuggingFaceTB/smollm-corpus", "fineweb-edu-dedup"
         num_datapoints = d["weight"] * max_steps
-        dataset  = load_dataset(**d["args"]) # .select(range(num_datapoints))
+        dataset  = load_dataset(**d["args"], download_config=DownloadConfig(resume_download=True,max_retries=10)) # .select(range(num_datapoints))
         train_dataset.append(dataset)
     train_dataset = concatenate_datasets(train_dataset).shuffle(seed=42, buffer_size=1000)
     
