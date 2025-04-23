@@ -1,14 +1,7 @@
 datasets:
-  - weight: 0.70
+  - weight: 1.0
     args:
-      path: "HuggingFaceTB/smollm-corpus"
-      name: "fineweb-edu-dedup"
-      split: train
-      streaming: True
-  - weight: 0.30
-    args:
-      path: "HuggingFaceTB/smollm-corpus"
-      name: "cosmopedia-v2"
+      path: "Zyphra/dclm-dedup"
       split: train
       streaming: True
 model_name: "HuggingFaceTB/SmolLM2-135M"
@@ -21,7 +14,7 @@ deq_max_steps: 0
 phantom_steps: 0
 distance_loss_weight: 0.8
 trainer_args:
-  max_steps: 5000
+  max_steps: 2000
   precision: bf16-true
   gradient_clip_val: 2.0
   accumulate_grad_batches: 1
