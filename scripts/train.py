@@ -15,7 +15,7 @@ from jsonargparse import CLI
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.utilities import grad_norm
-from llm_deq_conversion.model import DEQLlamaForCausalLM
+from llm_deq_conversion.model import DEQLlamaForCausalLM, DEQCausalLMOutputWithPast
 
 class CausalLLM(L.LightningModule):
     def __init__(
@@ -45,9 +45,9 @@ class CausalLLM(L.LightningModule):
             attention_mask=batch["attention_mask"],
             labels=batch["labels"]
         )
-        self.log("train_loss", output.loss)
-        if output.distance is not None:
-            self.log("train_distance", output.distance)
+        self.log("train_loss", output.loss, on_step=True)
+        if isinstance(output, DEQCausalLMOutputWithPast) and output.distance is not None:
+            self.log("train_distance", output.distance, on_step=True)
         return output.loss
 
     def validation_step(self, batch, batch_idx):
@@ -101,7 +101,7 @@ def train(
         train_dataset.append(dataset)
     train_dataset = concatenate_datasets(train_dataset).shuffle(seed=42, buffer_size=1000)
     
-        
+    folder_name = f"deq_steps={deq_max_steps}-phantom_steps={phantom_steps}"     
         
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -120,16 +120,24 @@ def train(
         collate_fn=data_collator,
         num_workers=os.cpu_count() 
     )
+
+
+    # --- Load the model ---
     config = AutoConfig.from_pretrained(model_name)
     config.use_cache = False
-    # config.torch_dtype = "float32"
-    model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, distance_loss_weight=distance_loss_weight)model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, distance_loss_weight=distance_loss_weight)
-    if state_dict_path is None:
-        original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
-        _ = model.load_state_dict(original_model_params, strict=False)
-        del original_model_params
+
+    if deq_max_steps > 0:
+        print("Training a DEQ model!!!")
+        model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, distance_loss_weight=distance_loss_weight)
+        if state_dict_path is None:
+            original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
+            _ = model.load_state_dict(original_model_params, strict=False)
+            del original_model_params
+        else:
+            _ = model.load_state_dict(torch.load(state_dict_path), strict=False)
     else:
-        _ = model.load_state_dict(torch.load(state_dict_path), strict=False)
+        print("Training a normal model!!!")
+        model = AutoModelForCausalLM.from_config(config)
     
     model.model.gradient_checkpointing = True
     lightning_model = CausalLLM(
@@ -143,9 +151,9 @@ def train(
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
     checkpoint_callback = ModelCheckpoint(
         every_n_train_steps=max_steps // 4, 
-        dirpath="checkpoints/",  
+        dirpath=f"checkpoints/{folder_name}",  
         save_last=True,
-        filename="step-{step:06d}",  
+        filename="{step:06d}-{train_loss:.2f}",  
     )
     learning_rate_callback = LearningRateMonitor()
     trainer = L.Trainer(
@@ -157,7 +165,7 @@ def train(
         lightning_model, train_dataloaders=train_dataloader, ckpt_path=ckpt_path
     )
     torch.save(
-        lightning_model.model.state_dict(), "adapted_model.pth"
+        lightning_model.model.state_dict(), f"checkpoints/{folder_name}/final_model.pth"
     )
 
 if __name__ == "__main__":
