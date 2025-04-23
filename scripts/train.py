@@ -97,7 +97,7 @@ def train(
     for d in datasets:
         # "HuggingFaceTB/smollm-corpus", "fineweb-edu-dedup"
         num_datapoints = d["weight"] * max_steps
-        dataset  = load_dataset(d["path"], d["name"], split="train", streaming=True) # .select(range(num_datapoints))
+        dataset  = load_dataset(**d["args"]) # .select(range(num_datapoints))
         train_dataset.append(dataset)
     train_dataset = concatenate_datasets(train_dataset).shuffle(seed=42, buffer_size=1000)
     
