@@ -21,6 +21,7 @@ dependencies = [
     "deepspeed>=0.16.7",
     "huggingface-hub[hf-xet]>=0.30.2",
     "tenacity>=9.1.2",
+    "zstandard>=0.23.0",
 ]
 
 [build-system]

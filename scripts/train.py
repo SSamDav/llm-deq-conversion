@@ -103,9 +103,9 @@ def train(
     for d in datasets:
         # "HuggingFaceTB/smollm-corpus", "fineweb-edu-dedup"
         num_datapoints = d["weight"] * max_steps
-        dataset  = load_dataset_with_retry(**d["args"], download_config=DownloadConfig(resume_download=True,max_retries=10)) # .select(range(num_datapoints))
+        dataset  = load_dataset(**d["args"], download_config=DownloadConfig(resume_download=True,max_retries=10)) # .select(range(num_datapoints))
         train_dataset.append(dataset)
-    train_dataset = concatenate_datasets(train_dataset).shuffle(seed=42, buffer_size=1000)
+    train_dataset = concatenate_datasets(train_dataset) # .shuffle(seed=42, buffer_size=1000)
     
     folder_name = f"deq_steps={deq_max_steps}-phantom_steps={phantom_steps}"     
         
@@ -124,7 +124,8 @@ def train(
         train_dataset,
         batch_size=batch_size,
         collate_fn=data_collator,
-        num_workers=os.cpu_count() 
+        num_workers=16,
+        shuffle=False 
     )
 
 
@@ -160,7 +161,7 @@ def train(
     wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "distance_weight": distance_loss_weight, "max_length": max_length, "datasets": datasets})
     checkpoint_callback = ModelCheckpoint(
         every_n_train_steps=max_steps // 5,
-        save_top_k=2,
+        save_top_k=-1,
         dirpath=f"checkpoints/{folder_name}",  
         save_last=True,
         filename="{step:06d}-{train_loss:.2f}",  
