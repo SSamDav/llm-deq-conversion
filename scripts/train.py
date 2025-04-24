@@ -1,6 +1,5 @@
 import lightning as L
 import os
-import tenacity
 import torch
 
 from datasets import interleave_datasets, load_dataset, DownloadConfig
@@ -74,9 +73,17 @@ class CausalLLM(L.LightningModule):
         self.log('Grad Norm', norms[f'grad_2.0_norm_total'],on_step=True, on_epoch=False)
 
 
-@tenacity.retry(stop=tenacity.stop_after_attempt(3), wait=tenacity.wait_fixed(5))
-def load_dataset_with_retry(*args, **kwargs):
-    return load_dataset(*args, **kwargs)
+class DEQStepsPatchCallback(L.Callback):
+    def __init__(self, max_steps, phantom_steps):
+        super().__init__()
+        self.max_steps = max_steps
+        self.phantom_steps = phantom_steps
+
+    def on_fit_start(self, trainer, pl_module):
+        pl_module.model.model.max_steps = self.max_steps 
+        pl_module.model.model.phantom_steps = self.phantom_steps 
+        print(f"max_steps set to: {pl_module.model.model.max_steps}")
+        print(f"phantom_steps set to: {pl_module.model.model.phantom_steps}")
 
 
 def train(
@@ -94,6 +101,7 @@ def train(
     trainer_args: Optional[dict] = None,
     ckpt_path: Optional[str] = None,
     state_dict_path: Optional[str] = None,
+    change_deq_steps: bool = False
 ):
     trainer_args = trainer_args or {}
     max_steps = trainer_args["max_steps"]
@@ -103,7 +111,7 @@ def train(
     for d in datasets:
         # "HuggingFaceTB/smollm-corpus", "fineweb-edu-dedup"
         weights.append(d["weight"])
-        dataset  = load_dataset_with_retry(**d["args"], download_config=DownloadConfig(resume_download=True,max_retries=10)) # .select(range(num_datapoints))
+        dataset  = load_dataset(**d["args"], download_config=DownloadConfig(resume_download=True,max_retries=10)) # .select(range(num_datapoints))
         train_dataset.append(dataset)
     train_dataset = interleave_datasets(train_dataset, probabilities=weights, seed=42)
     
@@ -166,9 +174,14 @@ def train(
         filename="{step:06d}-{train_loss:.2f}",  
     )
     learning_rate_callback = LearningRateMonitor(logging_interval="step")
+    callbacks = [checkpoint_callback, learning_rate_callback]
+    if change_deq_steps:
+        callbacks.append(
+            DEQStepsPatchCallback(deq_max_steps, phantom_steps)
+        )
     trainer = L.Trainer(
         logger=wandb_logger,
-        callbacks=[checkpoint_callback, learning_rate_callback],
+        callbacks=callbacks,
         **trainer_args
     )
     trainer.fit(
