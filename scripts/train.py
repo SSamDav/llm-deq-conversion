@@ -4,7 +4,7 @@ import torch
 
 from datasets import interleave_datasets, load_dataset, DownloadConfig
 from typing import Optional
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Sampler
 from torch.optim import AdamW
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
@@ -73,17 +73,18 @@ class CausalLLM(L.LightningModule):
         self.log('Grad Norm', norms[f'grad_2.0_norm_total'],on_step=True, on_epoch=False)
 
 
-class DEQStepsPatchCallback(L.Callback):
-    def __init__(self, max_steps, phantom_steps):
-        super().__init__()
-        self.max_steps = max_steps
-        self.phantom_steps = phantom_steps
+class SkipDataSampler(Sampler):
+    def __init__(self, n_skip: int, data_source) -> None:
+        super().__init__(data_source)
+        self.indices = list(range(len(data_source)))
+        self.indices = self.indices[n_skip:]
 
-    def on_fit_start(self, trainer, pl_module):
-        pl_module.model.model.max_steps = self.max_steps 
-        pl_module.model.model.phantom_steps = self.phantom_steps 
-        print(f"max_steps set to: {pl_module.model.model.max_steps}")
-        print(f"phantom_steps set to: {pl_module.model.model.phantom_steps}")
+    def __iter__(self):
+        return iter(self.indices)
+
+    def __len__(self):
+        return len(self.indices)
+        
 
 
 def train(
@@ -100,8 +101,8 @@ def train(
     distance_loss_weight: float = 0.001,
     trainer_args: Optional[dict] = None,
     ckpt_path: Optional[str] = None,
-    state_dict_path: Optional[str] = None,
-    change_deq_steps: bool = False
+    continue_training: bool = True,
+    skip_datapoints: Optional[int] = None
 ):
     trainer_args = trainer_args or {}
     max_steps = trainer_args["max_steps"]
@@ -126,12 +127,16 @@ def train(
         train_dataset.map(tokenize_function, remove_columns=drop_columns)
         .with_format("torch")
     )
-
+    sampler = None
+    if skip_datapoints:
+        sampler = SkipDataSampler(n_skip=skip_datapoints, data_source=train_dataset)
+    
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         collate_fn=data_collator,
+        sampler=sampler,
         num_workers=16,
         shuffle=False 
     )
@@ -140,22 +145,20 @@ def train(
     # --- Load the model ---
     config = AutoConfig.from_pretrained(model_name)
     config.use_cache = False
-
     if deq_max_steps > 0:
         print("Training a DEQ model!!!")
         model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, distance_loss_weight=distance_loss_weight)
-        if state_dict_path is None:
+        if ckpt_path is None:
             original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
             _ = model.load_state_dict(original_model_params, strict=False)
             del original_model_params
-        else:
-            _ = model.load_state_dict(torch.load(state_dict_path), strict=False)
-        # model.model.gradient_checkpointing = True
-        
+        elif continue_training is False:
+            ckpt = torch.load(ckpt_path, weights_only=False)
+            _ = model.load_state_dict(ckpt["state_dict"], strict=False)
+            del ckpt
     else:
         print("Training a normal model!!!")
         model = AutoModelForCausalLM.from_config(config)
-
     model.gradient_checkpointing_enable()
     lightning_model = CausalLLM(
         model=model,
