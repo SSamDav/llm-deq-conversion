@@ -102,7 +102,6 @@ def train(
     trainer_args: Optional[dict] = None,
     ckpt_path: Optional[str] = None,
     continue_training: bool = True,
-    skip_datapoints: Optional[int] = None
 ):
     trainer_args = trainer_args or {}
     max_steps = trainer_args["max_steps"]
@@ -127,16 +126,12 @@ def train(
         train_dataset.map(tokenize_function, remove_columns=drop_columns)
         .with_format("torch")
     )
-    sampler = None
-    if skip_datapoints:
-        sampler = SkipDataSampler(n_skip=skip_datapoints, data_source=train_dataset)
     
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         collate_fn=data_collator,
-        sampler=sampler,
         num_workers=16,
         shuffle=False 
     )
@@ -153,12 +148,15 @@ def train(
             _ = model.load_state_dict(original_model_params, strict=False)
             del original_model_params
         elif continue_training is False:
+            print(f"Loading weights from: {ckpt_path}")
             ckpt = torch.load(ckpt_path, weights_only=False)
             _ = model.load_state_dict(ckpt["state_dict"], strict=False)
             del ckpt
+            ckpt_path = None
     else:
         print("Training a normal model!!!")
         model = AutoModelForCausalLM.from_config(config)
+
     model.gradient_checkpointing_enable()
     lightning_model = CausalLLM(
         model=model,
@@ -179,10 +177,6 @@ def train(
     )
     learning_rate_callback = LearningRateMonitor(logging_interval="step")
     callbacks = [checkpoint_callback, learning_rate_callback]
-    if change_deq_steps:
-        callbacks.append(
-            DEQStepsPatchCallback(deq_max_steps, phantom_steps)
-        )
     trainer = L.Trainer(
         logger=wandb_logger,
         callbacks=callbacks,

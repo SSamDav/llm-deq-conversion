@@ -284,7 +284,6 @@ class DEQLlamaModel(LlamaModel):
         if self.max_steps > 0:
             with torch.no_grad():
                 hidden_states, _, stats = broyden_solver(f, hidden_states, max_iter=self.max_steps)
-      
         distance = None
         if self.training:
             for _ in range(self.phantom_steps):
@@ -301,10 +300,7 @@ class DEQLlamaModel(LlamaModel):
                     **flash_attn_kwargs
                 )
                 distance = (hidden_states - new_hidden_states).abs().mean()
-                if self.max_steps > 1 and self.phantom_steps > 1:
-                    hidden_states = (1 - self.damp) * hidden_states + self.damp * new_hidden_states
-                else:
-                    hidden_states = new_hidden_states
+                hidden_states = (1 - self.damp) * hidden_states + self.damp * new_hidden_states
 
 
         # add hidden states from the last decoder layer
@@ -466,8 +462,8 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
         loss = None
         if labels is not None:
             loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
-            if distance is not None and self.model.max_steps > 1:
-              loss += self.distance_loss_weight * distance
+            # if distance is not None and self.model.max_steps > 1:
+            #   loss += self.distance_loss_weight * distance
 
         return DEQCausalLMOutputWithPast(
             loss=loss,
