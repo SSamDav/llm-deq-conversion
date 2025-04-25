@@ -5,18 +5,21 @@ datasets:
       split: train
       streaming: True
 model_name: "HuggingFaceTB/SmolLM2-135M"
-batch_size: 64
+batch_size: 32
 max_length: 512
 lr: 0.001
 num_warmup_steps: 100
 num_decay_steps: 200
-deq_max_steps: 4
-phantom_steps: 1
+deq_max_steps: 24
+phantom_steps: 3
 distance_loss_weight: 0.8
+ckpt_path:
+continue_training: False
+skip_datapoints: 511872
 trainer_args:
-  max_steps: 5000
+  max_steps: 1000
   precision: bf16-true
   gradient_clip_val: 2.0
-  accumulate_grad_batches: 2
+  accumulate_grad_batches: 4
   # devices: 2
   # strategy: "deepspeed_stage_1"
