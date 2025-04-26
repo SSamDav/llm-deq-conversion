@@ -1,5 +1,4 @@
 import lightning as L
-import os
 import torch
 
 from datasets import interleave_datasets, load_dataset, DownloadConfig
@@ -98,7 +97,6 @@ def train(
     weight_decay: float = 0.01,
     deq_max_steps: int = 4,
     phantom_steps: int = 1,
-    distance_loss_weight: float = 0.001,
     trainer_args: Optional[dict] = None,
     ckpt_path: Optional[str] = None,
     continue_training: bool = True,
@@ -142,7 +140,7 @@ def train(
     config.use_cache = False
     if deq_max_steps > 0:
         print("Training a DEQ model!!!")
-        model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, distance_loss_weight=distance_loss_weight)
+        model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps)
         if ckpt_path is None:
             original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
             _ = model.load_state_dict(original_model_params, strict=False)
@@ -167,7 +165,7 @@ def train(
         weight_decay=weight_decay,
     )
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
-    wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "distance_weight": distance_loss_weight, "max_length": max_length, "datasets": datasets})
+    wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "max_length": max_length, "datasets": datasets})
     checkpoint_callback = ModelCheckpoint(
         every_n_train_steps=max_steps // 5,
         save_top_k=-1,

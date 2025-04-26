@@ -19,7 +19,6 @@ from transformers.models.llama.modeling_llama import  (
     KwargsForCausalLM
 )
 from typing import Optional, Tuple, Callable, Union
-from functools import partial
 
 import torch
 
@@ -362,12 +361,11 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
     _tp_plan = {"lm_head": "colwise_rep"}
     _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
 
-    def __init__(self, config, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, distance_loss_weight: float = 0.001):
+    def __init__(self, config, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9):
         super().__init__(config)
         self.model = DEQLlamaModel(config, max_steps, phantom_steps, damp)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        self.distance_loss_weight = distance_loss_weight
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -462,8 +460,6 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
         loss = None
         if labels is not None:
             loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
-            # if distance is not None and self.model.max_steps > 1:
-            #   loss += self.distance_loss_weight * distance
 
         return DEQCausalLMOutputWithPast(
             loss=loss,
