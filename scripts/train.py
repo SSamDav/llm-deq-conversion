@@ -148,7 +148,9 @@ def train(
         elif continue_training is False:
             print(f"Loading weights from: {ckpt_path}")
             ckpt = torch.load(ckpt_path, weights_only=False)
-            _ = model.load_state_dict(ckpt["state_dict"], strict=False)
+            _ = model.load_state_dict(
+                {k.removeprefix("model."): v for k, v in ckpt["state_dict"].items()}
+            )
             del ckpt
             ckpt_path = None
     else:
