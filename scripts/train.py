@@ -72,22 +72,26 @@ class CausalLLM(L.LightningModule):
         self.log('Grad Norm', norms[f'grad_2.0_norm_total'],on_step=True, on_epoch=False)
 
 
-class SkipDataSampler(Sampler):
-    def __init__(self, n_skip: int, data_source) -> None:
-        super().__init__(data_source)
-        self.indices = list(range(len(data_source)))
-        self.indices = self.indices[n_skip:]
+def data_collator(batch, tokenizer):
+  mask_len = [b["question_len"] for b in batch]
+  input_ids = [b["input_ids"] for b in batch]
+  max_len = max([len(i) for i in input_ids])
+  attention_mask = [[1] * len(i) + [0] * (max_len - len(i)) for i in input_ids]
+  input_ids = [i + [tokenizer.pad_token_id] * (max_len - len(i)) for i in input_ids]
+  input_ids = torch.tensor(input_ids)
+  attention_mask = torch.tensor(attention_mask)
+  labels = input_ids.clone()
 
-    def __iter__(self):
-        return iter(self.indices)
-
-    def __len__(self):
-        return len(self.indices)
-        
+  labels[labels == tokenizer.pad_token_id] = -100
+  for i, m in enumerate(mask_len):
+    labels[i, :m] = -100
+  input_ids = input_ids[:, :-1]
+  labels = labels[:, 1:]
+  attention_mask = attention_mask[:, :-1]
+  return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
 
 
 def train(
-    datasets: list[dict],
     model_name: str,
     batch_size: int,
     lr: float,
@@ -97,6 +101,7 @@ def train(
     weight_decay: float = 0.01,
     deq_max_steps: int = 4,
     phantom_steps: int = 1,
+    seed: int = 42,
     trainer_args: Optional[dict] = None,
     ckpt_path: Optional[str] = None,
     continue_training: bool = True,
@@ -104,34 +109,27 @@ def train(
     trainer_args = trainer_args or {}
     max_steps = trainer_args["max_steps"]
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    assert sum([d["weight"] for d in datasets]) == 1.0, "Dataset weights should sum to 1.0!"
-    train_dataset, weights = [], []
-    for d in datasets:
-        # "HuggingFaceTB/smollm-corpus", "fineweb-edu-dedup"
-        weights.append(d["weight"])
-        dataset  = load_dataset(**d["args"], download_config=DownloadConfig(resume_download=True,max_retries=10)) # .select(range(num_datapoints))
-        train_dataset.append(dataset)
-    train_dataset = interleave_datasets(train_dataset, probabilities=weights, seed=42)
-    
-    folder_name = f"deq_steps={deq_max_steps}-phantom_steps={phantom_steps}"     
+    train_dataset = load_dataset("openai/gsm8k", "main", split="train")   
+    folder_name = f"gsmk8_deq_steps={deq_max_steps}-phantom_steps={phantom_steps}"     
         
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    drop_columns = train_dataset.column_names
-    tokenize_function = lambda example: tokenizer(example["text"], truncation=True, max_length=max_length)
-    train_dataset = (
-        train_dataset.map(tokenize_function, remove_columns=drop_columns)
-        .with_format("torch")
-    )
+    train_dataset = train_dataset.map(
+        lambda example:
+        {
+            "question_len": len(tokenizer.tokenize(example["question"])),
+            "input_ids": tokenizer(example["question"] + " " + example["answer"])["input_ids"],
+        }
+    ).shuffle(seed=seed)
     
-    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    data_collator_fn = lambda batch: data_collator(batch, tokenizer=tokenizer)
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        collate_fn=data_collator,
+        collate_fn=data_collator_fn,
         num_workers=16,
-        shuffle=False 
+        shuffle=False
     )
 
 
@@ -155,7 +153,7 @@ def train(
             ckpt_path = None
     else:
         print("Training a normal model!!!")
-        model = AutoModelForCausalLM.from_config(config)
+        model = AutoModelForCausalLM.from_pretrained(model_name)
 
     model.gradient_checkpointing_enable()
     lightning_model = CausalLLM(
@@ -167,7 +165,7 @@ def train(
         weight_decay=weight_decay,
     )
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
-    wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "max_length": max_length, "datasets": datasets})
+    wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "max_length": max_length})
     checkpoint_callback = ModelCheckpoint(
         every_n_train_steps=max_steps // 5,
         save_top_k=-1,
