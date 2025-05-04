@@ -1,5 +1,5 @@
 model_name: "HuggingFaceTB/SmolLM2-135M"
-batch_size: 128
+batch_size: 32
 max_length: 1024 # max length for gmsk8 train is 538
 lr: 0.001
 num_warmup_steps: 100
