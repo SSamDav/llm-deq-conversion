@@ -1,9 +1,9 @@
 import lightning as L
 import torch
 
-from datasets import interleave_datasets, load_dataset, DownloadConfig
+from datasets import load_dataset
 from typing import Optional
-from torch.utils.data import DataLoader, Sampler
+from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
@@ -76,6 +76,7 @@ def data_collator(batch, tokenizer):
   mask_len = [b["question_len"] for b in batch]
   input_ids = [b["input_ids"] for b in batch]
   max_len = max([len(i) for i in input_ids])
+  # TODO: Left pad
   attention_mask = [[1] * len(i) + [0] * (max_len - len(i)) for i in input_ids]
   input_ids = [i + [tokenizer.pad_token_id] * (max_len - len(i)) for i in input_ids]
   input_ids = torch.tensor(input_ids)
@@ -83,6 +84,7 @@ def data_collator(batch, tokenizer):
   labels = input_ids.clone()
 
   labels[labels == tokenizer.pad_token_id] = -100
+  # TODO: Remove this 
   for i, m in enumerate(mask_len):
     labels[i, :m] = -100
   input_ids = input_ids[:, :-1]
@@ -108,22 +110,22 @@ def train(
 ):
     trainer_args = trainer_args or {}
     max_steps = trainer_args["max_steps"]
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    train_dataset = load_dataset("openai/gsm8k", "main", split="train")   
+    tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side='left', padding=True, truncation=True)
+    train_dataset = load_dataset("openai/gsm8k", "main", split="train")
     folder_name = f"gsmk8_deq_steps={deq_max_steps}-phantom_steps={phantom_steps}"     
         
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    drop_columns = train_dataset.column_names
     train_dataset = train_dataset.map(
         lambda example:
         {
-            "question_len": len(tokenizer.tokenize(example["question"])),
             "input_ids": tokenizer(example["question"] + " " + example["answer"])["input_ids"],
-        }
+        }, remove_columns=drop_columns
     ).shuffle(seed=seed)
     
-    data_collator_fn = lambda batch: data_collator(batch, tokenizer=tokenizer)
+    data_collator_fn = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
