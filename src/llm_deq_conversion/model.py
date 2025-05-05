@@ -6,7 +6,7 @@ from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 from transformers.cache_utils import Cache, DynamicCache
 from transformers.processing_utils import Unpack
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
-from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 from transformers.models.llama.modeling_llama import  (
     LlamaMLP, 
     LlamaRMSNorm, 
@@ -18,7 +18,7 @@ from transformers.models.llama.modeling_llama import  (
     logging,
     KwargsForCausalLM
 )
-from typing import Optional, Tuple, Callable, Union
+from typing import Optional, Tuple, Callable, Union, Dict, Any
 
 import torch
 
@@ -26,8 +26,62 @@ import torch
 logger = logging.get_logger(__name__)
 
 
+class DEQDynamicCache(DynamicCache):
+    def update(
+        self,
+        key_states: torch.Tensor,
+        value_states: torch.Tensor,
+        layer_idx: int,
+        cache_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Updates the cache with the new `key_states` and `value_states` for the layer `layer_idx`.
+
+        Parameters:
+            key_states (`torch.Tensor`):
+                The new key states to cache.
+            value_states (`torch.Tensor`):
+                The new value states to cache.
+            layer_idx (`int`):
+                The index of the layer to cache the states for.
+            cache_kwargs (`Dict[str, Any]`, `optional`):
+                Additional arguments for the cache subclass. No additional arguments are used in `DynamicCache`.
+
+        Return:
+            A tuple containing the updated key and value states.
+        """
+        # Update the number of seen tokens
+        if layer_idx == 0:
+            self._seen_tokens += key_states.shape[-2]
+
+        # Update the cache
+        if key_states is not None:
+            if len(self.key_cache) <= layer_idx:
+                # There may be skipped layers, fill them with empty lists
+                for _ in range(len(self.key_cache), layer_idx):
+                    self.key_cache.append(torch.tensor([]))
+                    self.value_cache.append(torch.tensor([]))
+                self.key_cache.append(key_states)
+                self.value_cache.append(value_states)
+            elif (
+                not self.key_cache[layer_idx].numel()  # prefers not t.numel() to len(t) == 0 to export the model
+            ):  # fills previously skipped layers; checking for tensor causes errors
+                self.key_cache[layer_idx] = key_states
+                self.value_cache[layer_idx] = value_states
+            else:
+                min_position = cache_kwargs["cache_position"].min()
+                self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx][:, :, :min_position, :], key_states], dim=-2)
+                self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx][:, :, :min_position, :], value_states], dim=-2)
+
+        return self.key_cache[layer_idx], self.value_cache[layer_idx]
+
 @dataclass
 class DEQCausalLMOutputWithPast(CausalLMOutputWithPast):
+    distance: Optional[float] = None
+    stats: Optional[dict] = None
+    
+@dataclass
+class DEQBaseModelOutputWithPast(BaseModelOutputWithPast):
     distance: Optional[float] = None
     stats: Optional[dict] = None
 
@@ -95,7 +149,8 @@ class DEQLlamaAttention(nn.Module):
         query_states = query_states + input_query_states
         key_states = key_states + input_key_states
         value_states = value_states + input_value_states
-
+                
+        # TODO: update only the last key value state, dor this change the DynamicCache to use the cache_position in order to update specific elements
         if past_key_value is not None:
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
@@ -227,7 +282,7 @@ class DEQLlamaModel(LlamaModel):
         output_hidden_states: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         **flash_attn_kwargs: Unpack[FlashAttentionKwargs],
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> DEQBaseModelOutputWithPast:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -251,7 +306,15 @@ class DEQLlamaModel(LlamaModel):
             inputs_embeds = self.embed_tokens(input_ids)
 
         if use_cache and past_key_values is None:
-            past_key_values = DynamicCache()
+            past_key_values = DEQDynamicCache()
+            
+        # Hack to convert the past_key_values to a DEQDynamicCache
+        if isinstance(past_key_values, DynamicCache):
+            old_past_key_values = past_key_values
+            past_key_values = DEQDynamicCache()
+            past_key_values._seen_tokens = old_past_key_values._seen_tokens
+            past_key_values.key_cache = old_past_key_values.key_cache
+            past_key_values.value_cache = old_past_key_values.value_cache
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -279,10 +342,14 @@ class DEQLlamaModel(LlamaModel):
             cache_position=cache_position,
             **flash_attn_kwargs
         )[0]
-        
+        # decoder layers
+        all_hidden_states = () if output_hidden_states else None
+        all_self_attns = () if output_attentions else None
+
         if self.max_steps > 0:
             with torch.no_grad():
                 hidden_states, _, stats = broyden_solver(f, hidden_states, max_iter=self.max_steps)
+                
         distance = None
         if self.training:
             for _ in range(self.phantom_steps):
@@ -306,7 +373,14 @@ class DEQLlamaModel(LlamaModel):
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
 
-        return hidden_states, distance, stats
+        return DEQBaseModelOutputWithPast(
+            last_hidden_state=hidden_states,
+            past_key_values=past_key_values if use_cache else None,
+            hidden_states=all_hidden_states,
+            attentions=all_self_attns,
+            distance=distance,
+            stats=stats
+        )
     
     def _transformer_layers(
         self,
@@ -440,7 +514,7 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
         )
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
-        hidden_states, distance, stats = self.model(
+        outputs: DEQBaseModelOutputWithPast = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -452,7 +526,9 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
             cache_position=cache_position,
             **kwargs,
         )
-
+        
+        # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
+        hidden_states = outputs.last_hidden_state
         # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         logits = self.lm_head(hidden_states[:, slice_indices, :])
@@ -464,6 +540,6 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
         return DEQCausalLMOutputWithPast(
             loss=loss,
             logits=logits,
-            distance=distance,
-            stats=stats
+            distance=outputs.distance,
+            stats=outputs.stats
         )
