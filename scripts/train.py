@@ -1,7 +1,6 @@
 import lightning as L
 import torch
 
-from datasets import load_dataset
 from typing import Optional
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
@@ -15,6 +14,7 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.utilities import grad_norm
 from llm_deq_conversion.model import DEQLlamaForCausalLM, DEQCausalLMOutputWithPast
+from llm_deq_conversion.dataset import load_dataset
 
 class CausalLLM(L.LightningModule):
     def __init__(
@@ -25,6 +25,7 @@ class CausalLLM(L.LightningModule):
         num_warmup_steps=100,
         num_decay_steps=200,
         weight_decay=0.01,
+        eos_token_id=0,
     ):
         super().__init__()
         self.lr = lr
@@ -32,13 +33,15 @@ class CausalLLM(L.LightningModule):
         self.num_decay_steps = num_decay_steps
         self.weight_decay = weight_decay
         self.max_steps = max_steps
-        self.save_hyperparameters()
         self.model = model
+        self.eos_token_id = eos_token_id
+        self.save_hyperparameters(ignore=["model", "eos_token_id"])
 
     def forward(self, input_ids, attention_mask, labels=None):
         return self.model(input_ids=input_ids, attention_mask=attention_mask, labels=labels).logits
 
     def training_step(self, batch, batch_idx):
+        batch["labels"][:, -1] = self.eos_token_id
         output= self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
@@ -50,6 +53,7 @@ class CausalLLM(L.LightningModule):
         return output.loss
 
     def validation_step(self, batch, batch_idx):
+        batch["labels"][:, -1] = self.eos_token_id
         val_loss = self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
@@ -72,31 +76,12 @@ class CausalLLM(L.LightningModule):
         self.log('Grad Norm', norms[f'grad_2.0_norm_total'],on_step=True, on_epoch=False)
 
 
-def data_collator(batch, tokenizer):
-  mask_len = [b["question_len"] for b in batch]
-  input_ids = [b["input_ids"] for b in batch]
-  max_len = max([len(i) for i in input_ids])
-  # TODO: Left pad
-  attention_mask = [[1] * len(i) + [0] * (max_len - len(i)) for i in input_ids]
-  input_ids = [i + [tokenizer.pad_token_id] * (max_len - len(i)) for i in input_ids]
-  input_ids = torch.tensor(input_ids)
-  attention_mask = torch.tensor(attention_mask)
-  labels = input_ids.clone()
-
-  labels[labels == tokenizer.pad_token_id] = -100
-  # TODO: Remove this 
-  for i, m in enumerate(mask_len):
-    labels[i, :m] = -100
-  input_ids = input_ids[:, :-1]
-  labels = labels[:, 1:]
-  attention_mask = attention_mask[:, :-1]
-  return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
-
-
 def train(
+    dataset_name: str,
     model_name: str,
     batch_size: int,
     lr: float,
+    use_cot: bool = False,
     max_length: int = 1024,
     num_warmup_steps: int = 100,
     num_decay_steps: int = 200,
@@ -111,20 +96,14 @@ def train(
     trainer_args = trainer_args or {}
     max_steps = trainer_args["max_steps"]
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side='left', padding=True, truncation=True)
-    train_dataset = load_dataset("openai/gsm8k", "main", split="train")
-    folder_name = f"gsmk8_deq_steps={deq_max_steps}-phantom_steps={phantom_steps}"     
-        
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    drop_columns = train_dataset.column_names
-    train_dataset = train_dataset.map(
-        lambda example:
-        {
-            "input_ids": tokenizer(example["question"] + " " + example["answer"])["input_ids"],
-        }, remove_columns=drop_columns
-    ).shuffle(seed=seed)
-    
+    train_dataset = load_dataset(name=dataset_name, tokenizer=tokenizer, cot=use_cot)
+    cot_text = "cot" if use_cot else "no-cot" 
+    folder_name = f"{dataset_name}[{cot_text}]_deq_steps={deq_max_steps}-phantom_steps={phantom_steps}"     
+      
+       
     data_collator_fn = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     train_dataloader = DataLoader(
         train_dataset,
@@ -137,7 +116,6 @@ def train(
 
     # --- Load the model ---
     config = AutoConfig.from_pretrained(model_name)
-    config.use_cache = False
     if deq_max_steps > 0:
         print("Training a DEQ model!!!")
         model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps)
@@ -160,6 +138,7 @@ def train(
     model.gradient_checkpointing_enable()
     lightning_model = CausalLLM(
         model=model,
+        eos_token_id=tokenizer.eos_token_id,
         max_steps=max_steps,
         lr=lr,
         num_warmup_steps=num_warmup_steps,
@@ -167,7 +146,7 @@ def train(
         weight_decay=weight_decay,
     )
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
-    wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "max_length": max_length})
+    wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "max_length": max_length, "dataset_name": dataset_name, "use_cot": use_cot})
     checkpoint_callback = ModelCheckpoint(
         every_n_train_steps=max_steps // 5,
         save_top_k=-1,
