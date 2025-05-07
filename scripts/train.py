@@ -100,6 +100,9 @@ def train(
         tokenizer.pad_token = tokenizer.eos_token
 
     train_dataset = load_dataset(name=dataset_name, tokenizer=tokenizer, cot=use_cot)
+    train_dataset = train_dataset.train_test_split(test_size=500)
+    val_dataset = train_dataset["test"]
+    train_dataset = train_dataset["train"]
     cot_text = "cot" if use_cot else "no-cot" 
     folder_name = f"{dataset_name}[{cot_text}]_deq_steps={deq_max_steps}-phantom_steps={phantom_steps}"     
       
@@ -111,6 +114,14 @@ def train(
         collate_fn=data_collator_fn,
         num_workers=16,
         shuffle=True
+    )
+    
+    val_dataloader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        collate_fn=data_collator_fn,
+        num_workers=16,
+        shuffle=False
     )
     max_steps = trainer_args.get("max_steps", trainer_args["max_epochs"] * len(train_dataloader))
 
@@ -163,7 +174,7 @@ def train(
         **trainer_args
     )
     trainer.fit(
-        lightning_model, train_dataloaders=train_dataloader, ckpt_path=ckpt_path
+        lightning_model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader, ckpt_path=ckpt_path
     )
     torch.save(
         lightning_model.model.state_dict(), f"checkpoints/{folder_name}/final_model.pth"

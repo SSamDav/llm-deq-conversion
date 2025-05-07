@@ -1,9 +1,9 @@
 model_name: "HuggingFaceTB/SmolLM2-135M"
 dataset_name: "gsm8k"
 use_cot: False
-batch_size: 32
+batch_size: 128
 max_length: 1024 # max length for gmsk8 with cot is 538
-lr: 0.001
+lr: 0.0001
 num_warmup_steps: 100
 num_decay_steps: 200
 deq_max_steps: 4
