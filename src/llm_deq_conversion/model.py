@@ -12,11 +12,16 @@ from transformers.models.llama.modeling_llama import  (
     LlamaRMSNorm, 
     LlamaForCausalLM,
     LlamaRotaryEmbedding,
+    LlamaDecoderLayer,
+    LlamaAttention,
     LlamaModel,
     apply_rotary_pos_emb,
     eager_attention_forward,
     logging,
     KwargsForCausalLM
+)
+from transformers.models.gpt2.modeling_gpt2 import (
+    
 )
 from typing import Optional, Tuple, Callable, Union, Dict, Any
 
@@ -85,7 +90,7 @@ class DEQBaseModelOutputWithPast(BaseModelOutputWithPast):
     distance: Optional[float] = None
     stats: Optional[dict] = None
 
-class DEQLlamaAttention(nn.Module):
+class DEQLlamaAttention(LlamaAttention):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
     def __init__(self, config: LlamaConfig, layer_idx: int):
@@ -183,7 +188,7 @@ class DEQLlamaAttention(nn.Module):
         return attn_output, attn_weights
 
 
-class DEQLlamaDecoderLayer(nn.Module):
+class DEQLlamaDecoderLayer(LlamaDecoderLayer):
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -544,66 +549,3 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
             stats=outputs.stats
         )
 
-if __name__ == "__main__":
-    from transformers import AutoTokenizer, AutoConfig
-    import time
-
-    config = AutoConfig.from_pretrained("HuggingFaceTB/SmolLM2-135M")
-    config.use_cache = True
-    tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM2-135M")
-    model = DEQLlamaForCausalLM(config, max_steps=4, phantom_steps=0, damp=0.9)
-    state_dict = torch.load("/Users/samuel.arcadinho/Code/llm-deq-conversion/data/model_states.pth", map_location="cpu")
-    error = model.load_state_dict(state_dict, strict=False)
-    model = model.eval()
-    
-
-    prompt = "Hey, are you conscious?"
-    inputs_with_cache = tokenizer(prompt, return_tensors="pt")
-    inputs = tokenizer(prompt, return_tensors="pt")
-    
-    past_key_values, cache_position = None, None
-    hidden_state_with_cache = torch.tensor([]).to(inputs_with_cache["input_ids"].device)
-    
-    start_time = time.time()
-    output_with_cache = model.generate(**inputs, use_cache=True, max_new_tokens=128, do_sample=False)
-    time_with_cache = time.time() - start_time
-    text = tokenizer.batch_decode(output_with_cache, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    print(f"Output with cache: {text}")
-    print(f"Time with cache: {time_with_cache:.2f} seconds")
-    start_time = time.time()
-    output_without_cache = model.generate(**inputs, use_cache=False, max_new_tokens=128, do_sample=False)
-    time_without_cache = time.time() - start_time
-    text = tokenizer.batch_decode(output_without_cache, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    print(f"Output with cache: {text}")
-    print(f"Time without cache: {time_without_cache:.2f} seconds")
-    
-    # # test if output of model.model with cache is the same as model.model without cache for 2 generations steps
-    # for step in range(5):
-    #     print(f"Generation step {step}")
-    #     outputs_with_cache = model.model(**inputs_with_cache, use_cache=True, past_key_values=past_key_values, cache_position=cache_position)
-    #     past_key_values = outputs_with_cache.past_key_values
-    #     outputs_without_cache = model.model(**inputs, use_cache=False)
-        
-    #     hidden_state_with_cache = torch.cat([hidden_state_with_cache, outputs_with_cache.last_hidden_state], dim=1)
-        
-    #     logits_with_cache = model.lm_head(outputs_with_cache.last_hidden_state)
-    #     next_token_with = torch.argmax(logits_with_cache[:, -1, :], dim=-1)
-    #     logits_without_cache = model.lm_head(outputs_without_cache.last_hidden_state)
-    #     next_token_without_cache = torch.argmax(logits_without_cache[:, -1, :], dim=-1)
-        
-    #     # append the next token to the input ids
-    #     inputs["input_ids"] = torch.cat([inputs["input_ids"], next_token_without_cache.unsqueeze(0)], dim=1)
-    #     inputs["attention_mask"] = torch.cat([inputs["attention_mask"], torch.ones((1, 1), device=inputs["input_ids"].device)], dim=1)
-    #     inputs_with_cache["input_ids"] = torch.cat([next_token_without_cache.unsqueeze(0)], dim=1)
-    #     inputs_with_cache["attention_mask"] = torch.cat([torch.ones((1, 1), device=inputs["input_ids"].device)], dim=1)
-        
-    #     print(f"Last hidden state with cache: {hidden_state_with_cache.shape}")
-    #     print(f"Last hidden state without cache: {outputs_without_cache.last_hidden_state.shape}")
-        
-    #     distance = (hidden_state_with_cache - outputs_without_cache.last_hidden_state).abs().mean()
-    #     are_close = next_token_with == next_token_without_cache
-    #     print(f"Are the outputs close? {are_close}")
-    #     print(f"Distance: {distance}")
-        
-    # final_text = tokenizer.batch_decode(inputs["input_ids"], skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    # print(f"Final text: {final_text}")
