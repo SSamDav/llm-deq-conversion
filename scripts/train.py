@@ -13,7 +13,7 @@ from jsonargparse import CLI
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.utilities import grad_norm
-from llm_deq_conversion.model import DEQLlamaForCausalLM, DEQCausalLMOutputWithPast
+from llm_deq_conversion.model import DEQLlamaForCausalLMV2, DEQCausalLMOutputWithPast
 from llm_deq_conversion.dataset import load_dataset
 
 class CausalLLM(L.LightningModule):
@@ -130,7 +130,7 @@ def train(
     config = AutoConfig.from_pretrained(model_name)
     if deq_max_steps > 0:
         print("Training a DEQ model!!!")
-        model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, damp=damp)
+        model = DEQLlamaForCausalLMV2(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, damp=damp)
         if ckpt_path is None:
             original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
             _ = model.load_state_dict(original_model_params, strict=False)
