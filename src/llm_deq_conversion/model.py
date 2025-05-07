@@ -20,9 +20,7 @@ from transformers.models.llama.modeling_llama import  (
     logging,
     KwargsForCausalLM
 )
-from transformers.models.gpt2.modeling_gpt2 import (
-    
-)
+
 from typing import Optional, Tuple, Callable, Union, Dict, Any
 
 import torch
@@ -548,4 +546,3 @@ class DEQLlamaForCausalLM(LlamaForCausalLM):
             distance=outputs.distance,
             stats=outputs.stats
         )
-

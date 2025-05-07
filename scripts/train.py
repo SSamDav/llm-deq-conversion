@@ -94,7 +94,6 @@ def train(
     continue_training: bool = True,
 ):
     trainer_args = trainer_args or {}
-    max_steps = trainer_args["max_steps"]
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side='left', padding=True, truncation=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -110,8 +109,9 @@ def train(
         batch_size=batch_size,
         collate_fn=data_collator_fn,
         num_workers=16,
-        shuffle=False
+        shuffle=True
     )
+    max_steps = trainer_args.get("max_steps", trainer_args["max_epochs"] * len(train_dataloader))
 
 
     # --- Load the model ---
