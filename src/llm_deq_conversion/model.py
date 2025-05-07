@@ -92,7 +92,7 @@ class DEQLlamaAttention(LlamaAttention):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
     def __init__(self, config: LlamaConfig, layer_idx: int):
-        super().__init__()
+        super().__init__(config, layer_idx)
         self.config = config
         self.layer_idx = layer_idx
         self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
@@ -188,7 +188,7 @@ class DEQLlamaAttention(LlamaAttention):
 
 class DEQLlamaDecoderLayer(LlamaDecoderLayer):
     def __init__(self, config: LlamaConfig, layer_idx: int):
-        super().__init__()
+        super().__init__(config, layer_idx)
         self.hidden_size = config.hidden_size
         self.self_attn = DEQLlamaAttention(config=config, layer_idx=layer_idx)
         self.mlp = LlamaMLP(config)
