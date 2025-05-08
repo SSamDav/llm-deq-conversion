@@ -449,6 +449,8 @@ class DEQLlamaModelV2(LlamaModel):
         self.phantom_steps = phantom_steps
         self.max_steps = max_steps
         self.damp = damp
+        self.adapter = torch.nn.Linear(config.hidden_size* 2, config.hidden_size, bias=config.mlp_bias)
+        self.gradient_checkpointing = False
 
     @can_return_tuple
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
@@ -515,7 +517,7 @@ class DEQLlamaModelV2(LlamaModel):
             use_cache=use_cache,
             cache_position=cache_position,
             **flash_attn_kwargs
-        )[0]
+        )
 
         
         with torch.no_grad():
@@ -565,7 +567,8 @@ class DEQLlamaModelV2(LlamaModel):
         cache_position,
         **flash_attn_kwargs
     ):
-        hidden_states = hidden_states + input_embeds
+        # hidden_states = hidden_states + input_embeds
+        hidden_states = self.adapter(torch.cat([hidden_states, input_embeds], dim=-1))
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
@@ -809,3 +812,14 @@ class DEQLlamaForCausalLMV2(LlamaForCausalLM):
             distance=outputs.distance,
             stats=outputs.stats
         )
+
+if __name__ == "__main__":
+    from transformers import AutoConfig, AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM2-135M")
+    config = AutoConfig.from_pretrained("HuggingFaceTB/SmolLM2-135M")
+    model = DEQLlamaModelV2(config, 4, 1)
+    model.train()
+    inputs = tokenizer("Hello!", return_tensors="pt")
+    out = model(**inputs)
+    
