@@ -130,6 +130,8 @@ def train(
     config = AutoConfig.from_pretrained(model_name)
     if deq_max_steps > 0:
         print("Training a DEQ model!!!")
+        # TODO: Fix cache
+        config.use_cache = False
         model = DEQLlamaForCausalLMV2(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, damp=damp)
         if ckpt_path is None:
             original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
