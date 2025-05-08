@@ -490,8 +490,16 @@ class DEQLlamaModelV2(LlamaModel):
             inputs_embeds = self.embed_tokens(input_ids)
 
         if use_cache and past_key_values is None:
-            past_key_values = DynamicCache()
-
+            past_key_values = DEQDynamicCache()
+            
+        # Hack to convert the past_key_values to a DEQDynamicCache
+        if isinstance(past_key_values, DynamicCache):
+            old_past_key_values = past_key_values
+            past_key_values = DEQDynamicCache()
+            past_key_values._seen_tokens = old_past_key_values._seen_tokens
+            past_key_values.key_cache = old_past_key_values.key_cache
+            past_key_values.value_cache = old_past_key_values.value_cache
+        
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
             cache_position = torch.arange(
