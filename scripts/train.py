@@ -82,6 +82,7 @@ def train(
     model_name: str,
     batch_size: int,
     lr: float,
+    solver: str = "fixed_point_iter",
     use_cot: bool = False,
     max_length: int = 1024,
     num_warmup_steps: int = 100,
@@ -133,7 +134,7 @@ def train(
         print("Training a DEQ model!!!")
         # TODO: Fix cache
         config.use_cache = False
-        model = DEQLlamaForCausalLMV2(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, damp=damp)
+        model = DEQLlamaForCausalLMV2(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, damp=damp, solver=solver)
         if ckpt_path is None:
             original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
             _ = model.load_state_dict(original_model_params, strict=False)
@@ -161,7 +162,7 @@ def train(
         weight_decay=weight_decay,
     )
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
-    wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "max_length": max_length, "dataset_name": dataset_name, "use_cot": use_cot, "damp": damp})
+    wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "max_length": max_length, "dataset_name": dataset_name, "use_cot": use_cot, "damp": damp, "solver": solver})
     checkpoint_callback = ModelCheckpoint(
         every_n_train_steps=max_steps // 5,
         save_top_k=-1,
