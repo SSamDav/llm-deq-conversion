@@ -511,8 +511,8 @@ class DEQLlamaModelV2(LlamaModel):
         causal_mask = self._update_causal_mask(
             attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
         )
-
-        hidden_states = torch.zeros_like(inputs_embeds)
+        _, _, H = inputs_embeds.shape
+        hidden_states = torch.zeros_like(inputs_embeds).reshape((-1, H))
         f = lambda x: self._transformer_layers(
             input_embeds=inputs_embeds,
             hidden_states=x,
@@ -533,6 +533,7 @@ class DEQLlamaModelV2(LlamaModel):
         if self.training:
             hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, tau=self.damp)
 
+        hidden_states = hidden_states.reshape(inputs_embeds.shape) # B x L x H
         # add hidden states from the last decoder layer
         # if output_hidden_states:
         #     all_hidden_states += (hidden_states,)
@@ -558,6 +559,8 @@ class DEQLlamaModelV2(LlamaModel):
         **flash_attn_kwargs
     ):
         # hidden_states = hidden_states + input_embeds
+        _, H = hidden_states.shape
+        hidden_states = hidden_states.reshape(input_embeds.shape) # B x L x H
         hidden_states = self.adapter(torch.cat([hidden_states, input_embeds], dim=-1))
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
@@ -588,6 +591,7 @@ class DEQLlamaModelV2(LlamaModel):
             #     all_self_attns += (layer_outputs[1],)
             
         hidden_states = self.norm(hidden_states)
+        hidden_states = hidden_states.reshape((-1, H)) # BL x H
         return hidden_states
         
 
@@ -799,7 +803,6 @@ class DEQLlamaForCausalLMV2(LlamaForCausalLM):
         return DEQCausalLMOutputWithPast(
             loss=loss,
             logits=logits,
-            distance=outputs.distance,
             stats=outputs.stats
         )
 
