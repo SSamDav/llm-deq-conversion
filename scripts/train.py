@@ -49,7 +49,8 @@ class CausalLLM(L.LightningModule):
         )
         self.log("train_loss", output.loss, on_step=True)
         if isinstance(output, DEQCausalLMOutputWithPast):
-            self.log("train_distance", output.stats["abs_lowest"], on_step=True)
+            self.log("train_abs_distance", output.stats["abs_lowest"].mean(), on_step=True)
+            self.log("train_rel_distance", output.stats["rel_lowest"].mean(), on_step=True)
         return output.loss
 
     def validation_step(self, batch, batch_idx):

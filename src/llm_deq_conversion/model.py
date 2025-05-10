@@ -528,10 +528,11 @@ class DEQLlamaModelV2(LlamaModel):
 
         
         with torch.no_grad():
-            hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.max_steps)
+            hidden_states, _, stats = self.solver(f, hidden_states, stop_mode='rel', max_iter=self.max_steps)
+
                 
         if self.training:
-            hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, tau=self.damp)
+            hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, stop_mode='rel',  tau=self.damp)
 
         hidden_states = hidden_states.reshape(inputs_embeds.shape) # B x L x H
         # add hidden states from the last decoder layer
