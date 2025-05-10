@@ -528,10 +528,10 @@ class DEQLlamaModelV2(LlamaModel):
 
         
         with torch.no_grad():
-            hidden_states, _, _ = self.solver(f, hidden_states, max_iter=self.max_steps)
+            hidden_states, _, stats = self.solver(f, hidden_states, stop_mode='rel', max_iter=self.max_steps)
                 
         if self.training:
-            hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, tau=self.damp)
+            hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, stop_mode='rel',  tau=self.damp)
 
         # add hidden states from the last decoder layer
         # if output_hidden_states:
@@ -799,7 +799,6 @@ class DEQLlamaForCausalLMV2(LlamaForCausalLM):
         return DEQCausalLMOutputWithPast(
             loss=loss,
             logits=logits,
-            distance=outputs.distance,
             stats=outputs.stats
         )
 
