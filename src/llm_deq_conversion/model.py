@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from torch import nn
-from torchdeq.solver.broyden import broyden_solver
+from torchdeq.solver import get_solver
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 from transformers.cache_utils import Cache, DynamicCache
@@ -88,7 +88,6 @@ class DEQCausalLMOutputWithPast(CausalLMOutputWithPast):
     
 @dataclass
 class DEQBaseModelOutputWithPast(BaseModelOutputWithPast):
-    distance: Optional[float] = None
     stats: Optional[dict] = None
 
 class DEQLlamaAttention(LlamaAttention):
@@ -384,7 +383,6 @@ class DEQLlamaModel(LlamaModel):
             past_key_values=past_key_values if use_cache else None,
             hidden_states=all_hidden_states,
             attentions=all_self_attns,
-            distance=distance,
             stats=stats
         )
     
@@ -444,11 +442,12 @@ class DEQLlamaModelV2(LlamaModel):
         config: LlamaConfig
     """
 
-    def __init__(self, config: LlamaConfig, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9):
+    def __init__(self, config: LlamaConfig, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, solver: str = "fixed_point_iter"):
         super().__init__(config)
         self.phantom_steps = phantom_steps
         self.max_steps = max_steps
         self.damp = damp
+        self.solver = get_solver(solver)
         self.adapter = torch.nn.Linear(config.hidden_size* 2, config.hidden_size, bias=config.mlp_bias)
         self.gradient_checkpointing = False
 
@@ -529,26 +528,10 @@ class DEQLlamaModelV2(LlamaModel):
 
         
         with torch.no_grad():
-            hidden_states, _, stats = broyden_solver(f, hidden_states, max_iter=self.max_steps)
+            hidden_states, _, _ = self.solver(f, hidden_states, max_iter=self.max_steps)
                 
-        distance = None
         if self.training:
-            for _ in range(self.phantom_steps):
-                new_hidden_states = self._transformer_layers(
-                    input_embeds=inputs_embeds,
-                    hidden_states=hidden_states,
-                    position_ids=position_ids,
-                    causal_mask=causal_mask,
-                    output_attentions=output_attentions,
-                    output_hidden_states=output_hidden_states,
-                    past_key_values=past_key_values,
-                    use_cache=use_cache,
-                    cache_position=cache_position,
-                    **flash_attn_kwargs
-                )
-                distance = (hidden_states - new_hidden_states).abs().mean()
-                hidden_states = (1 - self.damp) * hidden_states + self.damp * new_hidden_states
-        
+            hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, tau=self.damp)
 
         # add hidden states from the last decoder layer
         # if output_hidden_states:
@@ -559,7 +542,6 @@ class DEQLlamaModelV2(LlamaModel):
             past_key_values=past_key_values if use_cache else None,
             hidden_states=(),
             attentions=(),
-            distance=distance,
             stats=stats
         )
 
@@ -729,9 +711,9 @@ class DEQLlamaForCausalLMV2(LlamaForCausalLM):
     _tp_plan = {"lm_head": "colwise_rep"}
     _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
 
-    def __init__(self, config, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9):
+    def __init__(self, config, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, solver: str = "fixed_point_iter"):
         super().__init__(config)
-        self.model = DEQLlamaModelV2(config, max_steps, phantom_steps, damp)
+        self.model = DEQLlamaModelV2(config, max_steps, phantom_steps, damp, solver)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
