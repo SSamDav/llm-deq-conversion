@@ -528,7 +528,7 @@ class DEQLlamaModelV2(LlamaModel):
 
         
         with torch.no_grad():
-            hidden_states, _, _ = self.solver(f, hidden_states, max_iter=self.max_steps)
+            hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.max_steps)
                 
         if self.training:
             hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, tau=self.damp)
