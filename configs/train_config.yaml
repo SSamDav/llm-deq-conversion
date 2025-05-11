@@ -11,7 +11,7 @@ phantom_steps: 1
 damp: 0.8
 solver: fixed_point_iter
 trainer_args:
-  max_epochs: 10
+  max_epochs: 1
   precision: bf16-mixed
   gradient_clip_val: 2.0
   accumulate_grad_batches: 1

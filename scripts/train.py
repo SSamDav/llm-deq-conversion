@@ -13,6 +13,7 @@ from jsonargparse import CLI
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.utilities import grad_norm
+from lightning.fabric.utilities.seed import seed_everything  # noqa: E402
 from llm_deq_conversion.model import DEQLlamaForCausalLMV2, DEQCausalLMOutputWithPast
 from llm_deq_conversion.dataset import load_dataset
 
@@ -96,6 +97,7 @@ def train(
     ckpt_path: Optional[str] = None,
     continue_training: bool = True,
 ):
+    seed_everything(seed)
     trainer_args = trainer_args or {}
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side='left', padding=True, truncation=True)
     if tokenizer.pad_token is None:
