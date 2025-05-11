@@ -442,11 +442,12 @@ class DEQLlamaModelV2(LlamaModel):
         config: LlamaConfig
     """
 
-    def __init__(self, config: LlamaConfig, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, solver: str = "fixed_point_iter"):
+    def __init__(self, config: LlamaConfig, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, solver: str = "fixed_point_iter", return_final: bool = True):
         super().__init__(config)
         self.phantom_steps = phantom_steps
         self.max_steps = max_steps
         self.damp = damp
+        self.return_final = return_final
         self.solver = get_solver(solver)
         self.adapter = torch.nn.Linear(config.hidden_size* 2, config.hidden_size, bias=config.mlp_bias)
         self.gradient_checkpointing = False
@@ -528,11 +529,11 @@ class DEQLlamaModelV2(LlamaModel):
 
         
         with torch.no_grad():
-            hidden_states, _, stats = self.solver(f, hidden_states, stop_mode='rel', max_iter=self.max_steps)
+            hidden_states, _, stats = self.solver(f, hidden_states, stop_mode='rel', max_iter=self.max_steps, return_final=self.return_final)
 
                 
         if self.training:
-            hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, stop_mode='rel',  tau=self.damp)
+            hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, stop_mode='rel',  tau=self.damp, return_final=self.return_final)
 
         hidden_states = hidden_states.reshape(inputs_embeds.shape) # B x L x H
         # add hidden states from the last decoder layer
@@ -716,9 +717,9 @@ class DEQLlamaForCausalLMV2(LlamaForCausalLM):
     _tp_plan = {"lm_head": "colwise_rep"}
     _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
 
-    def __init__(self, config, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, solver: str = "fixed_point_iter"):
+    def __init__(self, config, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, solver: str = "fixed_point_iter", return_final: bool = True):
         super().__init__(config)
-        self.model = DEQLlamaModelV2(config, max_steps, phantom_steps, damp, solver)
+        self.model = DEQLlamaModelV2(config, max_steps, phantom_steps, damp, solver, return_final)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
