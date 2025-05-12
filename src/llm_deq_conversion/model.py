@@ -436,7 +436,7 @@ class DEQLlamaModelV2(LlamaModel):
         self.damp = damp
         self.return_final = return_final
         self.solver = get_solver(solver)
-        self.adapter = torch.nn.Linear(config.hidden_size* 2, config.hidden_size, bias=config.mlp_bias)
+        self.adapter = torch.nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.gradient_checkpointing = False
 
     @can_return_tuple
@@ -550,7 +550,7 @@ class DEQLlamaModelV2(LlamaModel):
         # hidden_states = hidden_states + input_embeds
         _, H = hidden_states.shape
         hidden_states = hidden_states.reshape(input_embeds.shape) # B x L x H
-        hidden_states = self.adapter(torch.cat([hidden_states, input_embeds], dim=-1))
+        hidden_states = self.adapter(hidden_states) +  input_embeds
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
