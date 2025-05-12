@@ -136,7 +136,7 @@ def train(
         print("Training a DEQ model!!!")
         # TODO: Fix cache
         config.use_cache = False
-        model = DEQLlamaForCausalLMV2(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, damp=damp, solver=solver)
+        model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, damp=damp, solver=solver)
         if ckpt_path is None:
             original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
             _ = model.load_state_dict(original_model_params, strict=False)
