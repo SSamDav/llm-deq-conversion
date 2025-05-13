@@ -523,6 +523,7 @@ class DEQLlamaModelV2(LlamaModel):
             hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, stop_mode='rel',  tau=self.damp, return_final=self.return_final)
 
         hidden_states = hidden_states.reshape(inputs_embeds.shape) # B x L x H
+        hidden_states = self.norm(hidden_states)
         # add hidden states from the last decoder layer
         # if output_hidden_states:
         #     all_hidden_states += (hidden_states,)
@@ -579,7 +580,7 @@ class DEQLlamaModelV2(LlamaModel):
             # if output_attentions:
             #     all_self_attns += (layer_outputs[1],)
             
-        hidden_states = self.norm(hidden_states)
+        # hidden_states = self.norm(hidden_states)
         hidden_states = hidden_states.reshape((-1, H)) # BL x H
         return hidden_states
         
