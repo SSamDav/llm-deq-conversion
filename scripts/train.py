@@ -27,6 +27,7 @@ class CausalLLM(L.LightningModule):
         num_decay_steps=200,
         weight_decay=0.01,
         eos_token_id=0,
+        mask_prompt=False
     ):
         super().__init__()
         self.lr = lr
@@ -36,6 +37,7 @@ class CausalLLM(L.LightningModule):
         self.max_steps = max_steps
         self.model = model
         self.eos_token_id = eos_token_id
+        self.mask_prompt = mask_prompt
         self.save_hyperparameters(ignore=["model", "eos_token_id"])
 
     def forward(self, input_ids, attention_mask, labels=None):
@@ -43,6 +45,9 @@ class CausalLLM(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         batch["labels"][:, -1] = self.eos_token_id
+        if self.mask_prompt:
+            for i, l in enumerate(batch["answer_length"]):
+                batch["input_ids"][i, :-l] = -100
         output= self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
@@ -56,6 +61,8 @@ class CausalLLM(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         batch["labels"][:, -1] = self.eos_token_id
+        for i, l in enumerate(batch["answer_length"]):
+            batch["input_ids"][i, :-l] = -100
         val_loss = self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
@@ -96,6 +103,7 @@ def train(
     trainer_args: Optional[dict] = None,
     ckpt_path: Optional[str] = None,
     continue_training: bool = True,
+    mask_prompt: bool = False
 ):
     seed_everything(seed)
     trainer_args = trainer_args or {}
@@ -162,6 +170,7 @@ def train(
         num_warmup_steps=num_warmup_steps,
         num_decay_steps=num_decay_steps,
         weight_decay=weight_decay,
+        mask_prompt=mask_prompt
     )
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
     wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "max_length": max_length, "dataset_name": dataset_name, "use_cot": use_cot, "damp": damp, "solver": solver})
