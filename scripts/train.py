@@ -27,7 +27,6 @@ class CausalLLM(L.LightningModule):
         num_decay_steps=200,
         weight_decay=0.01,
         eos_token_id=0,
-        mask_prompt=False
     ):
         super().__init__()
         self.lr = lr
@@ -37,7 +36,6 @@ class CausalLLM(L.LightningModule):
         self.max_steps = max_steps
         self.model = model
         self.eos_token_id = eos_token_id
-        self.mask_prompt = mask_prompt
         self.save_hyperparameters(ignore=["model", "eos_token_id"])
 
     def forward(self, input_ids, attention_mask, labels=None):
@@ -45,9 +43,6 @@ class CausalLLM(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         batch["labels"][:, -1] = self.eos_token_id
-        if self.mask_prompt:
-            for i, l in enumerate(batch["answer_length"]):
-                batch["input_ids"][i, :-l] = -100
         output= self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
@@ -61,8 +56,6 @@ class CausalLLM(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         batch["labels"][:, -1] = self.eos_token_id
-        for i, l in enumerate(batch["answer_length"]):
-            batch["input_ids"][i, :-l] = -100
         val_loss = self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
@@ -103,7 +96,6 @@ def train(
     trainer_args: Optional[dict] = None,
     ckpt_path: Optional[str] = None,
     continue_training: bool = True,
-    mask_prompt: bool = False
 ):
     seed_everything(seed)
     trainer_args = trainer_args or {}
@@ -144,10 +136,17 @@ def train(
         print("Training a DEQ model!!!")
         # TODO: Fix cache
         config.use_cache = False
-        model = DEQLlamaForCausalLM(config, max_steps=deq_max_steps, phantom_steps=phantom_steps, damp=damp, solver=solver)
+        model = DEQLlamaForCausalLMV2(
+            config,
+            max_steps=deq_max_steps,
+            phantom_steps=phantom_steps,
+            damp=damp,
+            solver=solver
+        )
         if ckpt_path is None:
-            original_model_params  = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
-            _ = model.load_state_dict(original_model_params, strict=False)
+            original_model_params = AutoModelForCausalLM.from_pretrained(model_name).state_dict()
+            errors = model.load_state_dict(original_model_params, strict=False)
+            print(errors)
             del original_model_params
         elif continue_training is False:
             print(f"Loading weights from: {ckpt_path}")
@@ -170,10 +169,19 @@ def train(
         num_warmup_steps=num_warmup_steps,
         num_decay_steps=num_decay_steps,
         weight_decay=weight_decay,
-        mask_prompt=mask_prompt
     )
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
-    wandb_logger.log_hyperparams({**trainer_args, "batch_size": batch_size, "deq_max_steps": deq_max_steps, "phantom_steps": phantom_steps, "max_length": max_length, "dataset_name": dataset_name, "use_cot": use_cot, "damp": damp, "solver": solver})
+    wandb_logger.log_hyperparams({
+         **trainer_args,
+         "batch_size": batch_size,
+         "deq_max_steps": deq_max_steps,
+         "phantom_steps": phantom_steps,
+         "max_length": max_length,
+         "dataset_name": dataset_name,
+         "use_cot": use_cot,
+         "damp": damp,
+         "solver": solver
+     })
     checkpoint_callback = ModelCheckpoint(
         every_n_train_steps=max_steps // 5,
         save_top_k=-1,
@@ -189,7 +197,10 @@ def train(
         **trainer_args
     )
     trainer.fit(
-        lightning_model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader, ckpt_path=ckpt_path
+        lightning_model,
+        train_dataloaders=train_dataloader,
+        val_dataloaders=val_dataloader,
+        ckpt_path=ckpt_path
     )
     torch.save(
         lightning_model.model.state_dict(), f"checkpoints/{folder_name}/final_model.pth"

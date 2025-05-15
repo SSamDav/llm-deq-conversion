@@ -436,7 +436,7 @@ class DEQLlamaModelV2(LlamaModel):
         self.damp = damp
         self.return_final = return_final
         self.solver = get_solver(solver)
-        self.adapter = torch.nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        # self.adapter = torch.nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.gradient_checkpointing = False
 
     @can_return_tuple
@@ -523,7 +523,7 @@ class DEQLlamaModelV2(LlamaModel):
             hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, stop_mode='rel',  tau=self.damp, return_final=self.return_final)
 
         hidden_states = hidden_states.reshape(inputs_embeds.shape) # B x L x H
-        hidden_states = self.norm(hidden_states)
+        # hidden_states = self.norm(hidden_states)
         # add hidden states from the last decoder layer
         # if output_hidden_states:
         #     all_hidden_states += (hidden_states,)
@@ -551,7 +551,8 @@ class DEQLlamaModelV2(LlamaModel):
         # hidden_states = hidden_states + input_embeds
         _, H = hidden_states.shape
         hidden_states = hidden_states.reshape(input_embeds.shape) # B x L x H
-        hidden_states = self.adapter(hidden_states) +  input_embeds
+        hidden_states = hidden_states + input_embeds
+        # hidden_states = self.adapter(hidden_states) +  input_embeds
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
@@ -580,7 +581,7 @@ class DEQLlamaModelV2(LlamaModel):
             # if output_attentions:
             #     all_self_attns += (layer_outputs[1],)
             
-        # hidden_states = self.norm(hidden_states)
+        hidden_states = self.norm(hidden_states)
         hidden_states = hidden_states.reshape((-1, H)) # BL x H
         return hidden_states
         
