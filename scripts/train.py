@@ -133,10 +133,11 @@ def train(
 
     # --- Load the model ---
     config = AutoConfig.from_pretrained(model_name)
-    if deq_max_steps > 0:
+    config.use_cache = False
+    config._attn_implementation = "sdpa"
+    if deq_max_steps > 0 or phantom_steps > 0:
         print("Training a DEQ model!!!")
         # TODO: Fix cache
-        config.use_cache = False
         model = DEQGPT2LMHeadModel(
             config,
             max_steps=deq_max_steps,

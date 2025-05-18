@@ -176,12 +176,12 @@ class DEQGPT2Model(GPT2Model):
                 
         if self.phantom_steps > 0:
             hidden_states, _, stats = self.solver(
-                    forward_func,
-                    hidden_states,
-                    max_iter=self.phantom_steps,
-                    tau=self.damp,
-                    return_final=self.return_final,
-                )
+                forward_func,
+                hidden_states,
+                max_iter=self.phantom_steps,
+                tau=self.damp,
+                return_final=self.return_final,
+            )
             
         hidden_states = hidden_states.view(output_shape)
 
@@ -381,11 +381,15 @@ if __name__ == "__main__":
     original_model.eval()
     
     inputs = tokenizer("Hello, my dog is cute", return_tensors="pt")
-    model = DEQGPT2LMHeadModel(config, max_steps=1, phantom_steps=0, damp=0.9, solver="fixed_point_iter", return_final=True)
+    model = DEQGPT2LMHeadModel(config, max_steps=0, phantom_steps=1, damp=1.0, solver="fixed_point_iter", return_final=True)
     model.eval()
     errors = model.load_state_dict(original_model.state_dict(), strict=False)
     print(errors)
-    outputs = model(**inputs, use_cache=False)
-    origin_outputs = original_model(**inputs, use_cache=False)
-    print("Are the outputs equal?", torch.allclose(outputs.logits, origin_outputs.logits, atol=1e-4))
-    print(config)
+    train_examples = {
+        "input_ids": inputs["input_ids"][:, :-1],
+        "attention_mask": inputs["attention_mask"][:, :-1],
+        "labels": inputs["input_ids"][:, 1:],
+    }
+    outputs = model(**train_examples, use_cache=False)
+    origin_outputs = original_model(**train_examples, use_cache=False)
+    print("Are the outputs equal?", torch.allclose(outputs.loss, origin_outputs.loss, atol=1e-4))
