@@ -1,5 +1,8 @@
 import lightning as L
 import torch
+import os
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from typing import Optional
 from torch.utils.data import DataLoader
@@ -49,7 +52,7 @@ class CausalLLM(L.LightningModule):
             attention_mask=batch["attention_mask"],
             labels=batch["labels"]
         )
-        self.log("train_loss", output.loss, on_step=True)
+        self.log("train_loss", output.loss, on_step=True, prog_bar=True)
         if isinstance(output, DEQCausalLMOutputWithPast) or isinstance(output, DEQCausalLMOutputWithCrossAttentions):
             self.log("train_abs_distance", output.stats["abs_lowest"].mean(), on_step=True)
             self.log("train_rel_distance", output.stats["rel_lowest"].mean(), on_step=True)
@@ -138,7 +141,7 @@ def train(
     if deq_max_steps > 0 or phantom_steps > 0:
         print("Training a DEQ model!!!")
         # TODO: Fix cache
-        model = DEQGPT2LMHeadModel(
+        model = DEQLlamaForCausalLMV2(
             config,
             max_steps=deq_max_steps,
             phantom_steps=phantom_steps,

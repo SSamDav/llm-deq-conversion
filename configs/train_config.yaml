@@ -1,4 +1,4 @@
-model_name: "openai-community/gpt2"
+model_name: "HuggingFaceTB/SmolLM2-135M" # "openai-community/gpt2"
 dataset_name: "gsm8k"
 use_cot: False
 batch_size: 32
