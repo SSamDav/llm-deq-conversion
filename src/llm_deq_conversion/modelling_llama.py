@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import partial
 from torch import nn
 from torchdeq.solver import get_solver
 from transformers.models.llama.configuration_llama import LlamaConfig
@@ -430,14 +431,12 @@ class DEQLlamaModelV2(LlamaModel):
     """
 
     def __init__(self, config: LlamaConfig, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, solver: str = "fixed_point_iter", return_final: bool = True):
-        super().__init__(config)
         self.phantom_steps = phantom_steps
         self.max_steps = max_steps
         self.damp = damp
         self.return_final = return_final
         self.solver = get_solver(solver)
-        # self.adapter = torch.nn.Linear(config.hidden_size, config.hidden_size, bias=False)
-        self.gradient_checkpointing = False
+        super().__init__(config)
 
     @can_return_tuple
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
@@ -499,9 +498,11 @@ class DEQLlamaModelV2(LlamaModel):
         causal_mask = self._update_causal_mask(
             attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
         )
-        _, _, H = inputs_embeds.shape
-        hidden_states = torch.zeros_like(inputs_embeds, requires_grad=False).view(-1, H)
-        f = lambda x: self._transformer_layers(
+        
+        # ========== DEQ =================
+        hidden_states = torch.zeros_like(inputs_embeds, requires_grad=False).view(-1, inputs_embeds.shape[-1])
+
+        func = lambda x, tau=1.0: tau * self._transformer_layers(
             input_embeds=inputs_embeds,
             hidden_states=x,
             position_ids=position_ids,
@@ -512,17 +513,55 @@ class DEQLlamaModelV2(LlamaModel):
             use_cache=use_cache,
             cache_position=cache_position,
             **flash_attn_kwargs
-        )
+        ) + (1 - tau) * x
+        
+        if self.max_steps > 0:
+            with torch.no_grad():
+                hidden_states, _, stats = self.solver(
+                    func=func,
+                    x0=hidden_states,
+                    max_iter=self.max_steps,
+                    tau=1.0,
+                    stop_mode='rel',
+                    return_final=True, 
+                )
+                
+        if self.phantom_steps > 0:
+            hidden_states, _, stats = self.solver(
+                func=func,
+                x0=hidden_states,
+                max_iter=self.phantom_steps,
+                tau=self.damp,
+                stop_mode='rel',
+                return_final=True, 
+            )
+        hidden_states = hidden_states.view(inputs_embeds.shape) # B x L x H
+        # ===========================
+        
+        # _, _, H = inputs_embeds.shape
+        # hidden_states = torch.zeros_like(inputs_embeds, requires_grad=False).view(-1, H)
+        # f = lambda x: self._transformer_layers(
+        #     input_embeds=inputs_embeds,
+        #     hidden_states=x,
+        #     position_ids=position_ids,
+        #     causal_mask=causal_mask,
+        #     output_attentions=output_attentions,
+        #     output_hidden_states=output_hidden_states,
+        #     past_key_values=past_key_values,
+        #     use_cache=use_cache,
+        #     cache_position=cache_position,
+        #     **flash_attn_kwargs
+        # )
 
         
-        with torch.no_grad():
-            hidden_states, _, stats = self.solver(f, hidden_states, stop_mode='rel', max_iter=self.max_steps, return_final=self.return_final)
+        # with torch.no_grad():
+        #     hidden_states, _, stats = self.solver(f, hidden_states, stop_mode='rel', max_iter=self.max_steps, return_final=self.return_final)
 
                 
-        if self.training:
-            hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, stop_mode='rel',  tau=self.damp, return_final=self.return_final)
+        # if self.training:
+        #     hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, stop_mode='rel',  tau=self.damp, return_final=self.return_final)
 
-        hidden_states = hidden_states.view(inputs_embeds.shape) # B x L x H
+        # hidden_states = hidden_states.view(inputs_embeds.shape) # B x L x H
         # hidden_states = self.norm(hidden_states)
         # add hidden states from the last decoder layer
         # if output_hidden_states:
@@ -549,40 +588,44 @@ class DEQLlamaModelV2(LlamaModel):
         **flash_attn_kwargs
     ):
         # hidden_states = hidden_states + input_embeds
-        _, H = hidden_states.shape
         hidden_states = hidden_states.view(input_embeds.shape) # B x L x H
-        hidden_states = hidden_states + input_embeds
-        # hidden_states = self.adapter(hidden_states) +  input_embeds
+        hidden_states = input_embeds + hidden_states
+        
+        
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
         # decoder layers
-        # all_hidden_states = () if output_hidden_states else None
-        # all_self_attns = () if output_attentions else None
-
         for decoder_layer in self.layers[: self.config.num_hidden_layers]:
-            # if output_hidden_states:
-            #     all_hidden_states += (hidden_states,)
-
-            layer_outputs = decoder_layer(
-                hidden_states,
-                attention_mask=causal_mask,
-                position_ids=position_ids,
-                past_key_value=past_key_values,
-                output_attentions=output_attentions,
-                use_cache=use_cache,
-                cache_position=cache_position,
-                position_embeddings=position_embeddings,
-                **flash_attn_kwargs,
-            )
+            if self.gradient_checkpointing and self.training:
+                layer_outputs = self._gradient_checkpointing_func(
+                    partial(decoder_layer.__call__, **flash_attn_kwargs),
+                    hidden_states,
+                    causal_mask,
+                    position_ids,
+                    past_key_values,
+                    output_attentions,
+                    use_cache,
+                    cache_position,
+                    position_embeddings,
+                )
+            else:
+                layer_outputs = decoder_layer(
+                    hidden_states,
+                    attention_mask=causal_mask,
+                    position_ids=position_ids,
+                    past_key_value=past_key_values,
+                    output_attentions=output_attentions,
+                    use_cache=use_cache,
+                    cache_position=cache_position,
+                    position_embeddings=position_embeddings,
+                    **flash_attn_kwargs,
+                )
 
             hidden_states = layer_outputs[0]
 
-            # if output_attentions:
-            #     all_self_attns += (layer_outputs[1],)
-            
         hidden_states = self.norm(hidden_states)
-        hidden_states = hidden_states.view(-1, H) # BL x H
+        hidden_states = hidden_states.view(-1, hidden_states.shape[-1]) # BL x H
         return hidden_states
         
 

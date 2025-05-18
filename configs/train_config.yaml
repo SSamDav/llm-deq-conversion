@@ -9,7 +9,7 @@ num_decay_steps: 500
 deq_max_steps: 0
 phantom_steps: 1
 damp: 1.0
-solver: fixed_point_iter
+solver: simple_fixed_point_iter
 trainer_args:
   max_epochs: 5
   precision: bf16-mixed
