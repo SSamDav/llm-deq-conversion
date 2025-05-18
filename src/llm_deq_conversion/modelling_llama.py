@@ -500,7 +500,7 @@ class DEQLlamaModelV2(LlamaModel):
             attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
         )
         _, _, H = inputs_embeds.shape
-        hidden_states = torch.zeros_like(inputs_embeds).reshape((-1, H))
+        hidden_states = torch.zeros_like(inputs_embeds, requires_grad=False).view(-1, H)
         f = lambda x: self._transformer_layers(
             input_embeds=inputs_embeds,
             hidden_states=x,
@@ -522,7 +522,7 @@ class DEQLlamaModelV2(LlamaModel):
         if self.training:
             hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, stop_mode='rel',  tau=self.damp, return_final=self.return_final)
 
-        hidden_states = hidden_states.reshape(inputs_embeds.shape) # B x L x H
+        hidden_states = hidden_states.view(inputs_embeds.shape) # B x L x H
         # hidden_states = self.norm(hidden_states)
         # add hidden states from the last decoder layer
         # if output_hidden_states:
@@ -550,7 +550,7 @@ class DEQLlamaModelV2(LlamaModel):
     ):
         # hidden_states = hidden_states + input_embeds
         _, H = hidden_states.shape
-        hidden_states = hidden_states.reshape(input_embeds.shape) # B x L x H
+        hidden_states = hidden_states.view(input_embeds.shape) # B x L x H
         hidden_states = hidden_states + input_embeds
         # hidden_states = self.adapter(hidden_states) +  input_embeds
         # create position embeddings to be shared across the decoder layers
@@ -582,7 +582,7 @@ class DEQLlamaModelV2(LlamaModel):
             #     all_self_attns += (layer_outputs[1],)
             
         hidden_states = self.norm(hidden_states)
-        hidden_states = hidden_states.reshape((-1, H)) # BL x H
+        hidden_states = hidden_states.view(-1, H) # BL x H
         return hidden_states
         
 

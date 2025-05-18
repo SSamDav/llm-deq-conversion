@@ -10,6 +10,7 @@ from torch.optim import AdamW
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.models.auto.configuration_auto import AutoConfig
+from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.optimization import get_wsd_schedule
 from jsonargparse import CLI
@@ -163,7 +164,9 @@ def train(
             ckpt_path = None
     else:
         print("Training a normal model!!!")
-        model = AutoModelForCausalLM.from_pretrained(model_name)
+        model = LlamaForCausalLM.from_pretrained(model_name)
+        model.config.use_cache = False
+        model.config._attn_implementation = "sdpa"
 
     model.gradient_checkpointing_enable()
     lightning_model = CausalLLM(
