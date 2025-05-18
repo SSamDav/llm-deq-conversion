@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from functools import partial
 from torch import nn
-from torchdeq.solver import get_solver
+from torchdeq.solver import get_solver, simple_fixed_point_iter
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 from transformers.cache_utils import Cache, DynamicCache
@@ -527,13 +527,11 @@ class DEQLlamaModelV2(LlamaModel):
                 )
                 
         if self.phantom_steps > 0:
-            hidden_states, _, stats = self.solver(
+            hidden_states, _, stats = simple_fixed_point_iter(
                 func=func,
                 x0=hidden_states,
                 max_iter=self.phantom_steps,
                 tau=self.damp,
-                stop_mode='rel',
-                return_final=True, 
             )
         hidden_states = hidden_states.view(inputs_embeds.shape) # B x L x H
         # ===========================
