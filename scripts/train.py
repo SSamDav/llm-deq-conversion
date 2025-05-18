@@ -14,7 +14,8 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.utilities import grad_norm
 from lightning.fabric.utilities.seed import seed_everything  # noqa: E402
-from llm_deq_conversion.model import DEQLlamaForCausalLMV2, DEQCausalLMOutputWithPast
+from llm_deq_conversion.modelling_llama import DEQLlamaForCausalLMV2, DEQCausalLMOutputWithPast
+from llm_deq_conversion.modelling_gpt2 import DEQGPT2LMHeadModel, DEQCausalLMOutputWithCrossAttentions
 from llm_deq_conversion.dataset import load_dataset
 
 class CausalLLM(L.LightningModule):
@@ -49,7 +50,7 @@ class CausalLLM(L.LightningModule):
             labels=batch["labels"]
         )
         self.log("train_loss", output.loss, on_step=True)
-        if isinstance(output, DEQCausalLMOutputWithPast):
+        if isinstance(output, DEQCausalLMOutputWithPast) or isinstance(output, DEQCausalLMOutputWithCrossAttentions):
             self.log("train_abs_distance", output.stats["abs_lowest"].mean(), on_step=True)
             self.log("train_rel_distance", output.stats["rel_lowest"].mean(), on_step=True)
         return output.loss
@@ -136,7 +137,7 @@ def train(
         print("Training a DEQ model!!!")
         # TODO: Fix cache
         config.use_cache = False
-        model = DEQLlamaForCausalLMV2(
+        model = DEQGPT2LMHeadModel(
             config,
             max_steps=deq_max_steps,
             phantom_steps=phantom_steps,

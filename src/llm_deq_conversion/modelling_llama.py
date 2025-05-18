@@ -796,6 +796,7 @@ class DEQLlamaForCausalLMV2(LlamaForCausalLM):
             logits=logits,
             stats=outputs.stats
         )
+        
 
 if __name__ == "__main__":
     from transformers import AutoConfig, AutoTokenizer
