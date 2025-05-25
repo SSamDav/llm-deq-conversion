@@ -21,6 +21,7 @@ from lightning.fabric.utilities.seed import seed_everything  # noqa: E402
 from llm_deq_conversion.modelling_llama import DEQLlamaForCausalLMV2, DEQCausalLMOutputWithPast
 from llm_deq_conversion.modelling_gpt2 import DEQGPT2LMHeadModel, DEQCausalLMOutputWithCrossAttentions
 from llm_deq_conversion.dataset import load_dataset
+from llm_deq_conversion.utils import fill_until
 
 class CausalLLM(L.LightningModule):
     def __init__(
@@ -48,7 +49,7 @@ class CausalLLM(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         batch["labels"][:, -1] = self.eos_token_id
-        output= self.model(
+        output: DEQCausalLMOutputWithPast = self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
             labels=batch["labels"]
@@ -61,12 +62,21 @@ class CausalLLM(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         batch["labels"][:, -1] = self.eos_token_id
-        val_loss = self.model(
+        output: DEQCausalLMOutputWithPast = self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
             labels=batch["labels"]
-        ).loss
-        self.log("val_loss", val_loss)
+        )
+        self.log("val_loss", output.loss)
+
+        gold = batch["labels"]
+        max_lenghts = batch["answer_length"] - 1
+        gold = fill_until(gold, max_lenghts, self.eos_token_id)
+        preds = output.logits.argmax(-1)
+        preds = fill_until(preds, max_lenghts, self.eos_token_id)
+        acc = torch.all(preds == gold, dim=-1).mean()
+        self.log("val_acc", acc)
+
 
     def configure_optimizers(self):
         optimizer = AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
@@ -96,6 +106,7 @@ def train(
     weight_decay: float = 0.01,
     deq_max_steps: int = 4,
     phantom_steps: int = 1,
+    return_final: bool = True,
     damp: float = 0.8,
     seed: int = 42,
     trainer_args: Optional[dict] = None,
@@ -147,6 +158,7 @@ def train(
             max_steps=deq_max_steps,
             phantom_steps=phantom_steps,
             damp=damp,
+            return_final=return_final,
             solver=solver
         )
         if ckpt_path is None:

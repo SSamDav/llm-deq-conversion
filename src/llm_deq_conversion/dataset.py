@@ -1,5 +1,7 @@
 from datasets import load_dataset as huggingface_load_dataset
 
+from llm_deq_conversion.utils import fill_until
+
 
 def load_dataset(
     name: str,
@@ -33,6 +35,7 @@ def load_dataset(
 if __name__ == "__main__":
     from transformers import AutoTokenizer
     from transformers.data.data_collator import DataCollatorForLanguageModeling
+    from llm_deq_conversion.utils import fill_until
 
     tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM2-135M", padding_side='left', padding=True, truncation=True)
     tokenizer.pad_token = tokenizer.eos_token
@@ -40,7 +43,14 @@ if __name__ == "__main__":
     data_collator_fn = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     print(dataset[0])
     batch = data_collator_fn([dataset[0], dataset[1]])
+    input_ids = batch["input_ids"]
+    answer_len = batch["answer_length"]
+    
     print(batch)
     for i, l in enumerate(batch["answer_length"]):
         batch["input_ids"][i, :-l] = tokenizer.eos_token_id
         print(tokenizer.decode(batch["input_ids"][i]))
+
+
+    input_ids = fill_until(input_ids, answer_len, tokenizer.eos_token_id)
+    print(tokenizer.batch_decode(input_ids))

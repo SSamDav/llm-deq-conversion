@@ -523,7 +523,7 @@ class DEQLlamaModelV2(LlamaModel):
                     max_iter=self.max_steps,
                     tau=1.0,
                     stop_mode='rel',
-                    return_final=True, 
+                    return_final=self.return_final, 
                 )
                 
         if self.phantom_steps > 0:
@@ -771,7 +771,7 @@ class DEQLlamaForCausalLMV2(LlamaForCausalLM):
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
         **kwargs: Unpack[KwargsForCausalLM],
-    ) -> CausalLMOutputWithPast:
+    ) -> DEQCausalLMOutputWithPast:
         r"""
             labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
                 Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
