@@ -74,7 +74,7 @@ class CausalLLM(L.LightningModule):
         gold = fill_until(gold, max_lenghts, self.eos_token_id)
         preds = output.logits.argmax(-1)
         preds = fill_until(preds, max_lenghts, self.eos_token_id)
-        acc = torch.all(preds == gold, dim=-1).mean()
+        acc = torch.all(preds == gold, dim=-1).float().mean()
         self.log("val_acc", acc)
 
 
