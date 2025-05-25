@@ -23,8 +23,8 @@ if ! grep -q 'export PATH=\$PATH:$HOME/hx/helix-25.01.1-x86_64-linux' ~/.bashrc;
 fi
 
 # Create Helix config file
-file="$HOME/.config/helix/config.toml" 
-mkdir -p "$(dirname "$file")" && touch "$file"
+config_file="$HOME/.config/helix/config.toml" 
+mkdir -p "$(dirname "$config_file")" && touch "$config_file"
 
 # Create Helix configuration
 helix_config="$(cat <<-EOF
@@ -44,4 +44,29 @@ max-indent-retain = 0
 wrap-indicator = "" # set wrap-indicator to "" to hide it
 EOF
 )"
-echo "$helix_config" > "$file"
+echo "$helix_config" > "$config_file"
+
+
+# Create Helix language configuration
+lang_file="$HOME/.config/helix/languages.toml" 
+mkdir -p "$(dirname "$lang_file")" && touch "$lang_file"
+
+# Create Helix language configuration
+lang_config="$(cat <<-EOF
+[[language]]
+name = "python"
+roots = [".", "pyproject.toml", "pyrightconfig.json"]
+language-servers = ["pyright"]
+auto-format = true
+
+[language-server.pyright]
+command = "pyright-langserver"
+args = ["--stdio"]
+config = {}
+
+[[language]]
+name = "javascript"
+language-servers = ["typescript-language-server"]
+EOF
+)"
+echo "$lang_config" > "$lang_file"
