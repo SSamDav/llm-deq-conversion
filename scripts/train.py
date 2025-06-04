@@ -68,15 +68,13 @@ class CausalLLM(L.LightningModule):
             labels=batch["labels"]
         )
         self.log("val_loss", output.loss)
-
-        gold = batch["labels"]
-        max_lenghts = batch["answer_length"] - 1
+        gold = batch["labels"][:, 1:]
+        max_lenghts = batch["answer_length"]
         gold = fill_until(gold, max_lenghts, self.eos_token_id)
-        preds = output.logits.argmax(-1)
+        preds = output.logits.argmax(-1)[:, :-1]
         preds = fill_until(preds, max_lenghts, self.eos_token_id)
         acc = torch.all(preds == gold, dim=-1).float().mean()
         self.log("val_acc", acc)
-
 
     def configure_optimizers(self):
         optimizer = AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
@@ -106,7 +104,8 @@ def train(
     weight_decay: float = 0.01,
     deq_max_steps: int = 4,
     phantom_steps: int = 1,
-    return_final: bool = True,
+    use_adapter: bool = False,
+    use_norm: bool = False,    return_final: bool = True,
     damp: float = 0.8,
     seed: int = 42,
     trainer_args: Optional[dict] = None,
@@ -159,6 +158,8 @@ def train(
             phantom_steps=phantom_steps,
             damp=damp,
             return_final=return_final,
+            use_adapter=use_adapter,
+            use_norm=use_norm,
             solver=solver
         )
         if ckpt_path is None:

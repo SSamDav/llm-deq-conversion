@@ -430,13 +430,35 @@ class DEQLlamaModelV2(LlamaModel):
         config: LlamaConfig
     """
 
-    def __init__(self, config: LlamaConfig, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, solver: str = "fixed_point_iter", return_final: bool = True):
+    def __init__(
+        self,
+        config: LlamaConfig,
+        max_steps: int = 4,
+        phantom_steps: int = 1,
+        damp: float = 0.9,
+        solver: str = "fixed_point_iter",
+        return_final: bool = True,
+        use_adapter: bool = False,
+        use_norm: bool = False
+    ):
         self.phantom_steps = phantom_steps
         self.max_steps = max_steps
         self.damp = damp
         self.return_final = return_final
         self.solver = get_solver(solver)
         super().__init__(config)
+        self.use_adapter = use_adapter
+        if self.use_adapter:
+            self.adapter = torch.nn.Linear(
+                config.hidden_size* 2,
+                config.hidden_size,
+                bias=config.mlp_bias
+            )
+        self.use_norm = use_norm
+        if self.use_norm:
+            self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+            
+
 
     @can_return_tuple
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
@@ -535,36 +557,7 @@ class DEQLlamaModelV2(LlamaModel):
             )
         hidden_states = hidden_states.view(inputs_embeds.shape) # B x L x H
         # ===========================
-        
-        # _, _, H = inputs_embeds.shape
-        # hidden_states = torch.zeros_like(inputs_embeds, requires_grad=False).view(-1, H)
-        # f = lambda x: self._transformer_layers(
-        #     input_embeds=inputs_embeds,
-        #     hidden_states=x,
-        #     position_ids=position_ids,
-        #     causal_mask=causal_mask,
-        #     output_attentions=output_attentions,
-        #     output_hidden_states=output_hidden_states,
-        #     past_key_values=past_key_values,
-        #     use_cache=use_cache,
-        #     cache_position=cache_position,
-        #     **flash_attn_kwargs
-        # )
-
-        
-        # with torch.no_grad():
-        #     hidden_states, _, stats = self.solver(f, hidden_states, stop_mode='rel', max_iter=self.max_steps, return_final=self.return_final)
-
                 
-        # if self.training:
-        #     hidden_states, _, stats = self.solver(f, hidden_states, max_iter=self.phantom_steps, stop_mode='rel',  tau=self.damp, return_final=self.return_final)
-
-        # hidden_states = hidden_states.view(inputs_embeds.shape) # B x L x H
-        # hidden_states = self.norm(hidden_states)
-        # add hidden states from the last decoder layer
-        # if output_hidden_states:
-        #     all_hidden_states += (hidden_states,)
-
         return DEQBaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=past_key_values if use_cache else None,
@@ -587,8 +580,13 @@ class DEQLlamaModelV2(LlamaModel):
     ):
         # hidden_states = hidden_states + input_embeds
         hidden_states = hidden_states.view(input_embeds.shape) # B x L x H
-        hidden_states = input_embeds + hidden_states
-        
+        if self.use_adapter:
+            hidden_states = self.adapter(torch.cat([hidden_states, input_embeds], dim=-1))
+        else:
+            hidden_states = input_embeds + hidden_states
+
+        if self.use_norm:
+            hidden_states = self.input_layernorm(hidden_states)
         
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
@@ -747,9 +745,28 @@ class DEQLlamaForCausalLMV2(LlamaForCausalLM):
     _tp_plan = {"lm_head": "colwise_rep"}
     _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
 
-    def __init__(self, config, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, solver: str = "fixed_point_iter", return_final: bool = True):
+    def __init__(
+        self,
+        config,
+        max_steps: int = 4,
+        phantom_steps: int = 1,
+        damp: float = 0.9,
+        solver: str = "fixed_point_iter",
+        return_final: bool = True,
+        use_adapter: bool = False,
+        use_norm: bool = False
+    ):
         super().__init__(config)
-        self.model = DEQLlamaModelV2(config, max_steps, phantom_steps, damp, solver, return_final)
+        self.model = DEQLlamaModelV2(
+            config,
+            max_steps,
+            phantom_steps,
+            damp,
+            solver,
+            return_final,
+            use_adapter,
+            use_norm
+        )
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
