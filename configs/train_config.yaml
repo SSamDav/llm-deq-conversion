@@ -1,17 +1,18 @@
 model_name: "HuggingFaceTB/SmolLM2-135M" # "openai-community/gpt2"
 dataset_name: "gsm8k"
 use_cot: False
-batch_size: 32
+batch_size: 128
 max_length: 1024 # max length for gmsk8 with cot is 538
 lr: 0.00005
 num_warmup_steps: 100
 num_decay_steps: 500
-deq_max_steps: 4
-phantom_steps: 1
+deq_max_steps: 0
+phantom_steps: 0
 damp: 0.8
 solver: fixed_point_iter
+return_final: False
 trainer_args:
-  max_epochs: 5
+  max_epochs: 100
   precision: bf16-mixed
   gradient_clip_val: 2.0
   accumulate_grad_batches: 1
