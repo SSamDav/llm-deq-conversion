@@ -12,7 +12,7 @@ damp: 0.8
 solver: fixed_point_iter
 return_final: False
 trainer_args:
-  max_epochs: 100
+  max_epochs: 500
   precision: bf16-mixed
   gradient_clip_val: 2.0
   accumulate_grad_batches: 1
