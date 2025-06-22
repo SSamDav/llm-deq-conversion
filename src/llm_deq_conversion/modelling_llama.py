@@ -18,7 +18,6 @@ from transformers.models.llama.modeling_llama import  (
     LlamaDecoderLayer,
     LlamaAttention,
     LlamaModel,
-    LLAMA_INPUTS_DOCSTRING,
     apply_rotary_pos_emb,
     eager_attention_forward,
     logging,
@@ -461,7 +460,6 @@ class DEQLlamaModelV2(LlamaModel):
 
 
     @can_return_tuple
-    @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
