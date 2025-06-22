@@ -194,15 +194,17 @@ def train(
     )
     wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
     wandb_logger.log_hyperparams({
-         **trainer_args,
-         "batch_size": batch_size,
-         "deq_max_steps": deq_max_steps,
-         "phantom_steps": phantom_steps,
-         "max_length": max_length,
-         "dataset_name": dataset_name,
-         "use_cot": use_cot,
-         "damp": damp,
-         "solver": solver
+        **trainer_args,
+        "batch_size": batch_size,
+        "deq_max_steps": deq_max_steps,
+        "phantom_steps": phantom_steps,
+        "max_length": max_length,
+        "dataset_name": dataset_name,
+        "use_cot": use_cot,
+        "damp": damp,
+        "use_adapter": use_adapter,
+        "use_norm": use_norm,
+        "solver": solver
      })
     checkpoint_callback = ModelCheckpoint(
         every_n_train_steps=max_steps // 5,
