@@ -65,7 +65,9 @@ class CausalLLM(L.LightningModule):
         output: DEQCausalLMOutputWithPast = self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
-            labels=batch["labels"]
+            labels=batch["labels"],
+            deq_steps=5,
+            phantom_steps=0
         )
         self.log("val_loss", output.loss)
         gold = batch["labels"][:, 1:]

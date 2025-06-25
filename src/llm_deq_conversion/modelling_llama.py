@@ -471,8 +471,12 @@ class DEQLlamaModelV2(LlamaModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        deq_steps: Optional[int] = None,
+        phantom_steps: Optional[int] = None,
         **flash_attn_kwargs: Unpack[FlashAttentionKwargs],
     ) -> BaseModelOutputWithPast:
+        deq_steps = deq_steps or self.max_steps
+        phantom_steps = phantom_steps or self.phantom_steps
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -535,22 +539,22 @@ class DEQLlamaModelV2(LlamaModel):
             **flash_attn_kwargs
         ) + (1 - tau) * x
         
-        if self.max_steps > 0:
+        if deq_steps > 0:
             with torch.no_grad():
                 hidden_states, _, stats = self.solver(
                     func=func,
                     x0=hidden_states,
-                    max_iter=self.max_steps,
+                    max_iter=deq_steps,
                     tau=1.0,
                     stop_mode='rel',
                     return_final=self.return_final, 
                 )
                 
-        if self.phantom_steps > 0:
+        if phantom_steps > 0:
             hidden_states, _, stats = simple_fixed_point_iter(
                 func=func,
                 x0=hidden_states,
-                max_iter=self.phantom_steps,
+                max_iter=phantom_steps,
                 tau=self.damp,
             )
         hidden_states = hidden_states.view(inputs_embeds.shape) # B x L x H
@@ -785,6 +789,8 @@ class DEQLlamaForCausalLMV2(LlamaForCausalLM):
         output_hidden_states: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
+        phantom_steps: Optional[int] = None,
+        deq_steps: Optional[int] = None,
         **kwargs: Unpack[KwargsForCausalLM],
     ) -> DEQCausalLMOutputWithPast:
         r"""
@@ -834,6 +840,8 @@ class DEQLlamaForCausalLMV2(LlamaForCausalLM):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             cache_position=cache_position,
+            deq_steps=deq_steps,
+            phantom_steps=phantom_steps,
             **kwargs,
         )
         
