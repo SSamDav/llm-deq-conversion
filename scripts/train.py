@@ -11,10 +11,12 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
+from transformers.models.gpt2.modeling_gpt2 import GPT2LMHeadModel
 from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.optimization import get_wsd_schedule
 from jsonargparse import CLI
 from lightning.pytorch.loggers import WandbLogger
+from aim.pytorch_lightning import AimLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.utilities import grad_norm
 from lightning.fabric.utilities.seed import seed_everything  # noqa: E402
@@ -49,7 +51,7 @@ class CausalLLM(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         batch["labels"][:, -1] = self.eos_token_id
-        output: DEQCausalLMOutputWithPast = self.model(
+        output: DEQCausalLMOutputWithCrossAttentions = self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
             labels=batch["labels"]
@@ -62,7 +64,7 @@ class CausalLLM(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         batch["labels"][:, -1] = self.eos_token_id
-        output: DEQCausalLMOutputWithPast = self.model(
+        output: DEQCausalLMOutputWithCrossAttentions = self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
             labels=batch["labels"],
@@ -155,14 +157,14 @@ def train(
     if deq_max_steps > 0 or phantom_steps > 0:
         print("Training a DEQ model!!!")
         # TODO: Fix cache
-        model = DEQLlamaForCausalLMV2(
+        model = DEQGPT2LMHeadModel(
             config,
-            max_steps=deq_max_steps,
+            deq_steps=deq_max_steps,
             phantom_steps=phantom_steps,
             damp=damp,
             return_final=return_final,
-            use_adapter=use_adapter,
-            use_norm=use_norm,
+            # use_adapter=use_adapter,
+            # use_norm=use_norm,
             solver=solver
         )
         if ckpt_path is None:
@@ -180,7 +182,7 @@ def train(
             ckpt_path = None
     else:
         print("Training a normal model!!!")
-        model = LlamaForCausalLM.from_pretrained(model_name)
+        model = GPT2LMHeadModel.from_pretrained(model_name)
         model.config.use_cache = False
         model.config._attn_implementation = "sdpa"
 
@@ -194,7 +196,8 @@ def train(
         num_decay_steps=num_decay_steps,
         weight_decay=weight_decay,
     )
-    wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
+    # wandb_logger = WandbLogger(project="LLM-to-DEQ", log_model=False)
+    wandb_logger = AimLogger(experiment='LLM-to-DEQ')
     wandb_logger.log_hyperparams({
         **trainer_args,
         "batch_size": batch_size,

@@ -36,7 +36,7 @@ class DEQGPT2Model(GPT2Model):
         self.deq_steps = deq_steps
         self.damp = damp
         self.return_final = return_final
-        self.adapter = nn.Linear(2*config.hidden_size, config.hidden_size)
+        # self.adapter = nn.Linear(2*config.hidden_size, config.hidden_size)
         self.solver = get_solver(solver)
     
     def _run_blocks(
@@ -55,9 +55,10 @@ class DEQGPT2Model(GPT2Model):
         output_hidden_states: bool,
         **kwargs,
     ) -> Union[torch.Tensor, Optional[tuple[torch.tensor]], Optional[tuple[torch.tensor]], Optional[tuple[torch.tensor]]]:
-        hidden_states = self.adapter(
-            torch.concat([input_embeds, hidden_states.reshape(input_embeds.shape)])
-        )
+        # hidden_states = self.adapter(
+            # torch.concat([input_embeds, hidden_states.reshape(input_embeds.shape)])
+        # )
+        hidden_states = input_embeds + hidden_states.reshape_as(input_embeds)
         # Runs through all transformer blocks and collects outputs
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
@@ -100,7 +101,7 @@ class DEQGPT2Model(GPT2Model):
 
         # Final layer normalization
         hidden_states = self.ln_f(hidden_states)
-        hidden_states.reshape((-1, hidden_states.shape[-1]))
+        hidden_states = hidden_states.reshape((-1, hidden_states.shape[-1]))
         return hidden_states, all_hidden_states, all_self_attentions, all_cross_attentions
 
     def forward(
@@ -255,7 +256,7 @@ class DEQGPT2Model(GPT2Model):
             use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states
-        ) * tau + (1 - tau) * x
+        )[0] * tau + (1 - tau) * x
         stats = None
         if deq_steps > 0:
             with torch.no_grad():
@@ -303,9 +304,9 @@ class DEQGPT2Model(GPT2Model):
 
     
 class DEQGPT2LMHeadModel(GPT2LMHeadModel):
-    def __init__(self, config: GPT2Config, max_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, solver: str = "fixed_point_iter", return_final: bool = True):
+    def __init__(self, config: GPT2Config, deq_steps: int = 4, phantom_steps: int = 1, damp: float = 0.9, solver: str = "fixed_point_iter", return_final: bool = True):
         super().__init__(config)
-        self.transformer = DEQGPT2Model(config, max_steps=max_steps, phantom_steps=phantom_steps, damp=damp, solver=solver, return_final=return_final)
+        self.transformer = DEQGPT2Model(config, deq_steps=deq_steps, phantom_steps=phantom_steps, damp=damp, solver=solver, return_final=return_final)
         self.post_init()
     
     def forward(
