@@ -36,33 +36,71 @@ class DEQGPT2Model(GPT2Model):
         self.deq_steps = deq_steps
         self.damp = damp
         self.return_final = return_final
-        # self.adapter = nn.Linear(2*config.hidden_size, config.hidden_size)
+        self.adapter = nn.Linear(2*config.hidden_size, config.hidden_size)
         self.solver = get_solver(solver)
     
     def _run_blocks(
         self,
         input_embeds: torch.Tensor,
         hidden_states: torch.Tensor,
+        position_embeds: torch.Tensor,
         past_key_values: Optional[Union[tuple[tuple[torch.Tensor]], Cache]],
         cache_position: torch.LongTensor,
-        causal_mask: torch.Tensor,
         attention_mask: Optional[torch.FloatTensor],
         head_mask: torch.FloatTensor,
         encoder_hidden_states: Optional[torch.Tensor],
         encoder_attention_mask: Optional[torch.FloatTensor],
         use_cache: bool,
         output_attentions: bool,
-        output_hidden_states: bool,
+        token_type_ids: Optional[torch.LongTensor] = None,
         **kwargs,
-    ) -> Union[torch.Tensor, Optional[tuple[torch.tensor]], Optional[tuple[torch.tensor]], Optional[tuple[torch.tensor]]]:
-        # hidden_states = self.adapter(
-            # torch.concat([input_embeds, hidden_states.reshape(input_embeds.shape)])
-        # )
-        hidden_states = input_embeds + hidden_states.reshape_as(input_embeds)
+    ) -> torch.Tensor:
+        input_shape = input_embeds.size()[:-1]
+        batch_size = input_embeds.shape[0]
+        device = input_embeds.device
+        hidden_states = self.adapter(
+          torch.cat([input_embeds, hidden_states.reshape_as(input_embeds)], dim=-1)
+        )
+        hidden_states = hidden_states + position_embeds.to(hidden_states.device)
+        # Attention mask.
+        # ._update_causal_mask() and ._prepare_4d_causal_attention_mask_with_cache_position() copied from LlamaModel
+        if attention_mask is not None and attention_mask.ndim < 4:
+            attention_mask = attention_mask.view(batch_size, -1)
+        causal_mask = self._update_causal_mask(
+            attention_mask, hidden_states, cache_position, past_key_values, output_attentions
+        )
+
+        # If a 2D or 3D attention mask is provided for the cross-attention
+        # we need to make broadcastable to [batch_size, num_heads, seq_length, seq_length]
+        _use_sdpa = self._attn_implementation == "sdpa" and output_attentions is False and head_mask is None
+        if self.config.add_cross_attention and encoder_hidden_states is not None:
+            encoder_batch_size, encoder_sequence_length, _ = encoder_hidden_states.size()
+            encoder_hidden_shape = (encoder_batch_size, encoder_sequence_length)
+            if encoder_attention_mask is None:
+                encoder_attention_mask = torch.ones(encoder_hidden_shape, device=device)
+            if _use_sdpa:
+                encoder_attention_mask = _prepare_4d_attention_mask_for_sdpa(
+                    mask=encoder_attention_mask, dtype=hidden_states.dtype, tgt_len=input_shape[-1]
+                )
+            elif not self._attn_implementation == "flash_attention_2":
+                encoder_attention_mask = self.invert_attention_mask(encoder_attention_mask)
+        else:
+            encoder_attention_mask = None
+
+        # Prepare head mask if needed
+        # 1.0 in head_mask indicate we keep the head
+        # attention_probs has shape bsz x n_heads x N x N
+        # head_mask has shape n_layer x batch x n_heads x N x N
+        head_mask = self.get_head_mask(head_mask, self.config.n_layer)
+
+        if token_type_ids is not None:
+            token_type_embeds = self.wte(token_type_ids)
+            hidden_states = hidden_states + token_type_embeds
+
+        hidden_states = self.drop(hidden_states)
+        
+        # hidden_states = input_embeds + hidden_states.reshape_as(input_embeds)
         # Runs through all transformer blocks and collects outputs
-        all_self_attentions = () if output_attentions else None
-        all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
-        all_hidden_states = () if output_hidden_states else None
         for i, block in enumerate(self.h):
             # Model parallel handling
             if self.model_parallel:
@@ -71,8 +109,6 @@ class DEQGPT2Model(GPT2Model):
                     attention_mask = attention_mask.to(hidden_states.device)
                 if isinstance(head_mask, torch.Tensor):
                     head_mask = head_mask.to(hidden_states.device)
-            if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
 
             outputs = block(
                 hidden_states,
@@ -88,11 +124,6 @@ class DEQGPT2Model(GPT2Model):
             )
             hidden_states = outputs[0]
 
-            if output_attentions:
-                all_self_attentions = all_self_attentions + (outputs[1],)
-                if self.config.add_cross_attention:
-                    all_cross_attentions = all_cross_attentions + (outputs[2],)
-
             # Model Parallel next device transfer
             if self.model_parallel:
                 for k, v in self.device_map.items():
@@ -102,7 +133,7 @@ class DEQGPT2Model(GPT2Model):
         # Final layer normalization
         hidden_states = self.ln_f(hidden_states)
         hidden_states = hidden_states.reshape((-1, hidden_states.shape[-1]))
-        return hidden_states, all_hidden_states, all_self_attentions, all_cross_attentions
+        return hidden_states
 
     def forward(
         self,
@@ -202,53 +233,15 @@ class DEQGPT2Model(GPT2Model):
             position_ids = cache_position.unsqueeze(0)
 
         position_embeds = self.wpe(position_ids)
-        inputs_embeds = inputs_embeds + position_embeds.to(inputs_embeds.device)
-
-        # Attention mask.
-        # ._update_causal_mask() and ._prepare_4d_causal_attention_mask_with_cache_position() copied from LlamaModel
-        if attention_mask is not None and attention_mask.ndim < 4:
-            attention_mask = attention_mask.view(batch_size, -1)
-        causal_mask = self._update_causal_mask(
-            attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
-        )
-
-        # If a 2D or 3D attention mask is provided for the cross-attention
-        # we need to make broadcastable to [batch_size, num_heads, seq_length, seq_length]
-        _use_sdpa = self._attn_implementation == "sdpa" and output_attentions is False and head_mask is None
-        if self.config.add_cross_attention and encoder_hidden_states is not None:
-            encoder_batch_size, encoder_sequence_length, _ = encoder_hidden_states.size()
-            encoder_hidden_shape = (encoder_batch_size, encoder_sequence_length)
-            if encoder_attention_mask is None:
-                encoder_attention_mask = torch.ones(encoder_hidden_shape, device=device)
-            if _use_sdpa:
-                encoder_attention_mask = _prepare_4d_attention_mask_for_sdpa(
-                    mask=encoder_attention_mask, dtype=inputs_embeds.dtype, tgt_len=input_shape[-1]
-                )
-            elif not self._attn_implementation == "flash_attention_2":
-                encoder_attention_mask = self.invert_attention_mask(encoder_attention_mask)
-        else:
-            encoder_attention_mask = None
-
-        # Prepare head mask if needed
-        # 1.0 in head_mask indicate we keep the head
-        # attention_probs has shape bsz x n_heads x N x N
-        # head_mask has shape n_layer x batch x n_heads x N x N
-        head_mask = self.get_head_mask(head_mask, self.config.n_layer)
-
-        if token_type_ids is not None:
-            token_type_embeds = self.wte(token_type_ids)
-            inputs_embeds = inputs_embeds + token_type_embeds
-
-        inputs_embeds = self.drop(inputs_embeds)
-        hidden_states = torch.zeros_like(inputs_embeds).reshape(-1, inputs_embeds.shape[-1])
         output_shape = (-1,) + input_shape[1:] + (inputs_embeds.size(-1),)
+        hidden_states = torch.zeros_like(inputs_embeds).reshape(-1, inputs_embeds.shape[-1])
 
         deq_forward = lambda x, tau=1.0: self._run_blocks(
             input_embeds=inputs_embeds,
             hidden_states=x,
+            position_embeds=position_embeds,
             past_key_values=past_key_values,
             cache_position=cache_position,
-            causal_mask=causal_mask,
             attention_mask=attention_mask,
             head_mask=head_mask,
             encoder_hidden_states=encoder_hidden_states,
@@ -256,7 +249,7 @@ class DEQGPT2Model(GPT2Model):
             use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states
-        )[0] * tau + (1 - tau) * x
+        ) * tau + (1 - tau) * x
         stats = None
         if deq_steps > 0:
             with torch.no_grad():
@@ -275,13 +268,10 @@ class DEQGPT2Model(GPT2Model):
                 x0=hidden_states,
                 max_iter=phantom_steps,
                 tau=self.damp,
+                return_final=True
             )
 
         hidden_states = hidden_states.view(output_shape)
-        # Add last hidden state
-        if output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
-
         past_key_values = past_key_values if use_cache else None
         if return_legacy_cache:
             past_key_values = (
@@ -292,7 +282,7 @@ class DEQGPT2Model(GPT2Model):
         if not return_dict:
             return tuple(
                 v
-                for v in [hidden_states, past_key_values, all_hidden_states, all_self_attentions, all_cross_attentions]
+                for v in [hidden_states, past_key_values]
                 if v is not None
             )
 
