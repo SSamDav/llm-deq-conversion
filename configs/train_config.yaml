@@ -3,15 +3,15 @@ dataset_name: "gsm8k"
 use_cot: False
 batch_size: 64
 max_length: 1024 # max length for gmsk8 with cot is 538
-lr: 0.0001
+lr: 0.00005
 num_warmup_steps: 100
 num_decay_steps: 0
 deq_max_steps: 4
-phantom_steps: 1
+phantom_steps: 2
 # use_adapter: True
 damp: 0.8
-solver: fixed_point_iter
-return_final: False
+solver: fixed_point_iter  # broyden fixed_point_iter 
+return_final: True  # False
 trainer_args:
   max_epochs: 100
   precision: bf16-mixed

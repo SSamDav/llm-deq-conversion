@@ -21,7 +21,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.utilities import grad_norm
 from lightning.fabric.utilities.seed import seed_everything  # noqa: E402
 from llm_deq_conversion.modelling_llama import DEQLlamaForCausalLMV2, DEQCausalLMOutputWithPast
-from llm_deq_conversion.modelling_gpt2 import DEQGPT2LMHeadModel, DEQCausalLMOutputWithCrossAttentions
+from llm_deq_conversion.modelling_gpt2 import DEQGPT2LMHeadModel, DEQCausalLMOutputWithCrossAttentions, EBGPT2LMHeadModel, CausalLMOutputWithCrossAttentions
 from llm_deq_conversion.dataset import load_dataset
 from llm_deq_conversion.utils import fill_until
 
@@ -51,7 +51,7 @@ class CausalLLM(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         batch["labels"][:, -1] = self.eos_token_id
-        output: DEQCausalLMOutputWithCrossAttentions = self.model(
+        output: CausalLMOutputWithCrossAttentions | DEQCausalLMOutputWithCrossAttentions = self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
             labels=batch["labels"]
@@ -64,7 +64,7 @@ class CausalLLM(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         batch["labels"][:, -1] = self.eos_token_id
-        output: DEQCausalLMOutputWithCrossAttentions = self.model(
+        output: CausalLMOutputWithCrossAttentions | DEQCausalLMOutputWithCrossAttentions = self.model(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
             labels=batch["labels"],
